@@ -750,7 +750,49 @@ function setIfcStatus(tabId, msg) {
 
 const logEntriesEl = $('logEntries');
 const logCountEl   = $('logCount');
+const logPanelEl   = $('logPanel');
+const logResizerEl = $('logResizer');
 let   _logCount    = 0;
+
+// ── Log panel vertical resize ──────────────────────────────────────────────
+const LOG_HEIGHT_KEY = 'eao_logHeight';
+const LOG_HEIGHT_DEFAULT = 150;
+
+(function initLogResize() {
+  // Restore saved height
+  const saved = parseInt(localStorage.getItem(LOG_HEIGHT_KEY), 10);
+  if (saved && saved >= 60) logPanelEl.style.height = saved + 'px';
+
+  let startY = 0;
+  let startH = 0;
+
+  logResizerEl.addEventListener('mousedown', e => {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = logPanelEl.getBoundingClientRect().height;
+    logResizerEl.classList.add('log-resizer--dragging');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!logResizerEl.classList.contains('log-resizer--dragging')) return;
+    // Dragging up = larger log (mouse moves up = delta is negative = height increases)
+    const delta = startY - e.clientY;
+    const newH  = Math.max(60, Math.min(window.innerHeight * 0.8, startH + delta));
+    logPanelEl.style.height = newH + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!logResizerEl.classList.contains('log-resizer--dragging')) return;
+    logResizerEl.classList.remove('log-resizer--dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Persist
+    const h = Math.round(logPanelEl.getBoundingClientRect().height);
+    localStorage.setItem(LOG_HEIGHT_KEY, h);
+  });
+})();
 
 function clearLog() {
   logEntriesEl.innerHTML = '';

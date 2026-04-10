@@ -367,11 +367,39 @@ body {
 ════════════════════════════════════════════════════════════════════════════ */
 .log-panel {
   flex-shrink: 0;
-  height: 150px;
+  height: 150px;       /* overridden by JS from localStorage */
+  min-height: 60px;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
-  border-top: 2px solid var(--dp-eao-dark-accent, #6d2077);
+  border-top: none;    /* replaced by resize handle */
   background: #fafafa;
+  position: relative;
+}
+
+/* Drag handle sits above the log panel */
+.log-resizer {
+  flex-shrink: 0;
+  height: 6px;
+  background: var(--dp-eao-dark-accent, #6d2077);
+  cursor: ns-resize;
+  position: relative;
+}
+.log-resizer:hover,
+.log-resizer--dragging {
+  background: #8e2ea1;
+}
+.log-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.4);
+  box-shadow: 0 -3px 0 rgba(255,255,255,0.4), 0 3px 0 rgba(255,255,255,0.4);
 }
 
 .log-header {

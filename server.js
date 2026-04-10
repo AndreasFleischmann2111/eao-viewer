@@ -315,6 +315,25 @@ app.post('/api/viewer/load', async (req, res) => {
     }
     log('✓ Document loaded on worker', 'success');
 
+    // ── 4b. List available sheets (diagnostic) ────────────────────────────────
+    try {
+      const sheetsListRes = await fetch(
+        `${workerUri}/api/Sheet/GetAll?slotId=${encodeURIComponent(slotId)}`,
+        { headers: ldAuthHdr, signal: AbortSignal.timeout(15_000) }
+      );
+      if (sheetsListRes.ok) {
+        const sheetsList = await sheetsListRes.json();
+        const names = (Array.isArray(sheetsList) ? sheetsList : sheetsList.sheets ?? sheetsList.value ?? [])
+          .map(s => s.zb_DESC ?? s.ZB_DESC ?? s.name ?? s.Name ?? JSON.stringify(s))
+          .join(', ');
+        log(`Available sheets: ${names || '(none listed)'}`);
+      } else {
+        log(`Sheet/GetAll HTTP ${sheetsListRes.status} (no sheet list)`, 'warning');
+      }
+    } catch (e) {
+      log(`Sheet listing skipped: ${e.message}`, 'warning');
+    }
+
     // ── 5. Export each sheet ──────────────────────────────────────────────────
     const results = {};
 
@@ -331,7 +350,9 @@ app.post('/api/viewer/load', async (req, res) => {
 
       const exportRes = await fetch(url, { headers: ldAuthHdr, signal: AbortSignal.timeout(60_000) });
       if (!exportRes.ok) {
-        log(`  ${sheet.name}  — not available (HTTP ${exportRes.status})`, 'warning');
+        const errBody = await exportRes.text().catch(() => '');
+        log(`  ${sheet.name}  — HTTP ${exportRes.status}: ${errBody.slice(0, 300)}`, 'warning');
+        log(`  Export URL: ${url}`, 'warning');
         results[sheet.name] = null;
         continue;
       }
