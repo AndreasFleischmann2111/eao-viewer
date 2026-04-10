@@ -243,15 +243,35 @@ app.post('/api/viewer/load', async (req, res) => {
     ldAuthHdr = authHdr;
     log('✓ Authenticated', 'success');
 
-    // ── 2. Download LD3 from EAO ──────────────────────────────────────────────
-    log(`Downloading LD3 from EAO (${env.toUpperCase()})…`);
+    // ── 2. Download LD3 from EAO (two-step: token → binary) ──────────────────
+    //
+    // Step 2a — request a one-time download token
+    //   sheetType=8  → full LD3 elevator-group bundle
+    //   fileType=0   → LD3 binary format
+    log(`Requesting LD3 download token from EAO (${env.toUpperCase()})…`);
+    const tokenRes = await fetch(
+      `${base}/api/elevatorgroup/preparefiledownload` +
+      `?elevatorGroupId=${encodeURIComponent(groupId)}&sheetType=8&fileType=0`,
+      { headers: authHdr, signal: AbortSignal.timeout(90_000) }
+    );
+    if (!tokenRes.ok) {
+      const b = await tokenRes.text().catch(() => '');
+      throw new Error(`preparefiledownload HTTP ${tokenRes.status}: ${b.slice(0, 200)}`);
+    }
+    const tokenJson = await tokenRes.json();
+    const oneTimeToken = tokenJson.oneTimeToken ?? tokenJson.OneTimeToken ?? tokenJson.token;
+    if (!oneTimeToken) throw new Error('preparefiledownload: no oneTimeToken in response');
+    log('✓ Download token received', 'success');
+
+    // Step 2b — fetch the binary file using the one-time token
+    log('Downloading LD3 binary…');
     const ld3Res = await fetch(
-      `${base}/api/ElevatorGroup/PrepareFileDownload?elevatorGroupId=${encodeURIComponent(groupId)}`,
+      `${base}/api/elevatorgroup/downloadfile?accessId=${encodeURIComponent(oneTimeToken)}`,
       { headers: { ...authHdr, Accept: 'application/octet-stream' }, signal: AbortSignal.timeout(90_000) }
     );
     if (!ld3Res.ok) {
       const b = await ld3Res.text().catch(() => '');
-      throw new Error(`EAO PrepareFileDownload HTTP ${ld3Res.status}: ${b.slice(0, 200)}`);
+      throw new Error(`downloadfile HTTP ${ld3Res.status}: ${b.slice(0, 200)}`);
     }
     const ld3Buffer = Buffer.from(await ld3Res.arrayBuffer());
     log(`✓ LD3 downloaded  (${(ld3Buffer.length / 1024).toFixed(1)} KB)`, 'success');
