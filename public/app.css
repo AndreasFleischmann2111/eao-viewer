@@ -10,11 +10,18 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  overflow: hidden;           /* layout handles scrolling per-panel */
+  overflow: hidden;
   background-color: var(--dp-body-bg, #ffffff);
   color: var(--dp-font-default, #343a40);
   font-family: "Open Sans", sans-serif;
   font-size: 13px;
+}
+
+/* Use column flex on body so app-layout gets exactly the remaining height,
+   regardless of how tall the header grows (it can wrap to 2 rows). */
+body {
+  display: flex;
+  flex-direction: column;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -28,7 +35,7 @@ html, body {
   background: var(--dp-eao-dark, #343a40);
   border-bottom: 2px solid var(--dp-eao-dark-accent, #6d2077);
   flex-wrap: wrap;
-  flex-shrink: 0;
+  flex-shrink: 0;   /* keeps header visible — body flex handles the rest */
 }
 
 .eao-header-logo {
@@ -81,7 +88,26 @@ html, body {
   transition: border-color 0.15s;
 }
 
-#groupId { min-width: 300px; font-family: monospace; font-size: 12px; }
+.ctrl-input--groupid    { min-width: 280px; font-family: monospace; font-size: 12px; }
+.ctrl-input--dispatcher { min-width: 260px; }
+
+/* Vertical separator between EAO and LDWorker sections in the header */
+.ctrl-sep {
+  width: 1px;
+  height: 36px;
+  background: rgba(255,255,255,0.2);
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 0;
+}
+
+/* Load Files button — slightly different shade to distinguish from Load */
+.load-btn--files {
+  background: #4a1650;
+  border-color: #4a1650;
+}
+.load-btn--files:hover { background: #6d2077; border-color: #6d2077; }
+.load-btn--files:disabled { opacity: 0.45; }
 
 .ctrl-input:focus { border-color: var(--dp-eao-input-border-color-focus, #6d2077); }
 
@@ -144,12 +170,14 @@ html, body {
 /* ════════════════════════════════════════════════════════════════════════════
    TWO-COLUMN LAYOUT
 ════════════════════════════════════════════════════════════════════════════ */
+.status-bar { flex-shrink: 0; }
+
 .app-layout {
   display: flex;
   flex-direction: row;
-  /* Fill remaining viewport below header + status bar */
-  height: calc(100vh - 58px);   /* header ~56px + 2px border */
+  flex: 1;          /* fills whatever height remains after header + status bar */
   overflow: hidden;
+  min-height: 0;    /* required so flex children can shrink below content size */
 }
 
 /* ── Left panel ───────────────────────────────────────────────────────────── */
@@ -194,21 +222,6 @@ html, body {
   display: flex;
   flex-direction: column;
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
-   VIEWER HEADER (dispatcher URL + Load Files)
-════════════════════════════════════════════════════════════════════════════ */
-.viewer-header {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--dp-eao-dark, #343a40);
-  border-bottom: 2px solid var(--dp-eao-dark-accent, #6d2077);
-  flex-shrink: 0;
-}
-
-.ctrl-input--full { width: 100%; min-width: 0; }
 
 /* ════════════════════════════════════════════════════════════════════════════
    TAB BAR

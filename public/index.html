@@ -20,9 +20,11 @@
 
   <div class="eao-header-controls">
 
+    <!-- ── EAO section ──────────────────────────────────────────────────────── -->
     <div class="ctrl-group">
       <label class="ctrl-label">Elevator Group ID</label>
-      <input id="groupId" type="text" class="ctrl-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+      <input id="groupId" type="text" class="ctrl-input ctrl-input--groupid"
+             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
     </div>
 
     <div class="ctrl-group">
@@ -47,6 +49,32 @@
       <button id="loadBtn" class="load-btn">
         <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
         Load
+      </button>
+    </div>
+
+    <!-- ── Separator ────────────────────────────────────────────────────────── -->
+    <div class="ctrl-sep"></div>
+
+    <!-- ── LDWorker / Files section ─────────────────────────────────────────── -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Dispatcher URL</label>
+      <input id="dispatcherUrl" type="text" class="ctrl-input ctrl-input--dispatcher"
+             placeholder="https://dispatcher.example.com" />
+    </div>
+
+    <div class="ctrl-group">
+      <label class="ctrl-label">LD Username</label>
+      <input id="ldUsername" type="email" class="ctrl-input" placeholder="user@example.com" />
+    </div>
+    <div class="ctrl-group">
+      <label class="ctrl-label">LD Password</label>
+      <input id="ldPassword" type="password" class="ctrl-input" placeholder="••••••••" />
+    </div>
+
+    <div class="ctrl-group ctrl-group--action">
+      <button id="loadFilesBtn" class="load-btn load-btn--files" disabled>
+        <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
+        Load Files
       </button>
     </div>
 
@@ -129,21 +157,6 @@
 
   <!-- ── Right panel: drawings viewer ────────────────────────────────────── -->
   <div class="panel-right" id="panelRight">
-
-    <!-- Viewer header: dispatcher URL + Load Files button -->
-    <div class="viewer-header">
-      <div class="ctrl-group" style="flex:1; min-width:0;">
-        <label class="ctrl-label">Dispatcher URL</label>
-        <input id="dispatcherUrl" type="text" class="ctrl-input ctrl-input--full"
-               placeholder="https://dispatcher.example.com" />
-      </div>
-      <div class="ctrl-group ctrl-group--action">
-        <button id="loadFilesBtn" class="load-btn" disabled>
-          <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
-          Load Files
-        </button>
-      </div>
-    </div>
 
     <!-- Tab bar -->
     <div class="viewer-tabs" id="viewerTabs">

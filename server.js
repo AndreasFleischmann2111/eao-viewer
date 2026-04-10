@@ -204,11 +204,15 @@ app.post('/api/load', async (req, res) => {
 //       Adjust if the actual endpoint differs in your environment.
 //
 app.post('/api/viewer/load', async (req, res) => {
-  const { env, email, password, groupId, dispatcherUrl, sheets } = req.body;
+  const { env, email, password, groupId, dispatcherUrl, ldEmail, ldPassword, sheets } = req.body;
 
   if (!env || !email || !password || !groupId || !dispatcherUrl || !Array.isArray(sheets)) {
     return res.status(400).json({ error: 'env, email, password, groupId, dispatcherUrl, sheets are required' });
   }
+
+  // LD credentials — fall back to EAO credentials if not provided
+  const ldUser = ldEmail    || email;
+  const ldPass = ldPassword || password;
   if (!BASE_URLS[env]) {
     return res.status(400).json({ error: `Unknown environment: ${env}` });
   }
@@ -233,10 +237,16 @@ app.post('/api/viewer/load', async (req, res) => {
     }
     const ld3Buffer = Buffer.from(await ld3Res.arrayBuffer());
 
-    // ── 2. Open dispatcher slot ───────────────────────────────────────────────
+    // ── 2. Open dispatcher slot (uses LD credentials, not EAO token) ─────────
+    const ldToken = await getToken(env, ldUser, ldPass).catch(async () => {
+      // If LD has same auth server as EAO, reuse the EAO token fetch result
+      return token;
+    });
+    const ldAuthHdr = { Authorization: `Bearer ${ldToken}` };
+
     const slotRes = await fetch(`${dispatchBase}/api/Slot/Open`, {
       method:  'POST',
-      headers: { ...authHdr, 'Content-Type': 'application/json' },
+      headers: { ...ldAuthHdr, 'Content-Type': 'application/json' },
       body:    JSON.stringify({ region: 'eu-central-1', forHumanUser: true, killAfterIdleSeconds: 240 }),
       signal:  AbortSignal.timeout(15_000),
     });
@@ -258,7 +268,7 @@ app.post('/api/viewer/load', async (req, res) => {
 
     const loadRes = await fetch(`${workerUri}/api/Document/Load?slotId=${encodeURIComponent(slotId)}`, {
       method:  'POST',
-      headers: authHdr,   // do NOT set Content-Type — let FormData set the multipart boundary
+      headers: ldAuthHdr, // do NOT set Content-Type — let FormData set the multipart boundary
       body:    formData,
       signal:  AbortSignal.timeout(60_000),
     });
@@ -279,7 +289,7 @@ app.post('/api/viewer/load', async (req, res) => {
         `&options.primaryLCID=2057` +   // English UK
         `&options.options=0`;
 
-      const exportRes = await fetch(url, { headers: authHdr, signal: AbortSignal.timeout(60_000) });
+      const exportRes = await fetch(url, { headers: ldAuthHdr, signal: AbortSignal.timeout(60_000) });
       if (!exportRes.ok) {
         // Non-fatal: sheet may not exist; record empty result
         results[sheet.name] = null;
@@ -303,7 +313,7 @@ app.post('/api/viewer/load', async (req, res) => {
     // workerBaseURI is required in query string (Slot/Close will fail without it)
     await fetch(
       `${dispatchBase}/api/Slot/Close?slotId=${encodeURIComponent(slotId)}&workerBaseURI=${encodeURIComponent(workerUri)}`,
-      { method: 'DELETE', headers: authHdr, signal: AbortSignal.timeout(15_000) }
+      { method: 'DELETE', headers: ldAuthHdr, signal: AbortSignal.timeout(15_000) }
     ).catch(e => console.warn('Slot/Close failed (non-fatal):', e.message));
 
     res.json({ ok: true, results });

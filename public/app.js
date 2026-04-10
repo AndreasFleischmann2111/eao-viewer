@@ -15,14 +15,12 @@ function saveSettings(settings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-// settings structure:
+// settings structure (all per-environment):
 // {
-//   lastEnv:       'prod',
-//   lastGroupId:   '...',
-//   dispatcherUrl: 'https://...',
-//   dev:     { email: '', password: '' },
-//   staging: { email: '', password: '' },
-//   prod:    { email: '', password: '' },
+//   lastEnv: 'prod',
+//   dev:     { email: '', password: '', groupId: '', dispatcherUrl: '', ldEmail: '', ldPassword: '' },
+//   staging: { ... },
+//   prod:    { ... },
 // }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -30,14 +28,16 @@ function saveSettings(settings) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const $ = id => document.getElementById(id);
-const groupIdInput      = $('groupId');
-const usernameInput     = $('username');
-const passwordInput     = $('password');
-const loadBtn           = $('loadBtn');
-const statusBar         = $('statusBar');
-const envButtons        = document.querySelectorAll('.env-btn');
+const groupIdInput       = $('groupId');
+const usernameInput      = $('username');
+const passwordInput      = $('password');
+const loadBtn            = $('loadBtn');
+const statusBar          = $('statusBar');
+const envButtons         = document.querySelectorAll('.env-btn');
 const dispatcherUrlInput = $('dispatcherUrl');
-const loadFilesBtn      = $('loadFilesBtn');
+const ldUsernameInput    = $('ldUsername');
+const ldPasswordInput    = $('ldPassword');
+const loadFilesBtn       = $('loadFilesBtn');
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  RESIZABLE PANEL
@@ -89,14 +89,7 @@ let currentEnv = 'prod';
 (function init() {
   const s = loadSettings();
   currentEnv = s.lastEnv || 'prod';
-  groupIdInput.value = s.lastGroupId || '';
-  if (s.dispatcherUrl) dispatcherUrlInput.value = s.dispatcherUrl;
-
-  setActiveEnv(currentEnv, false);
-
-  const envCreds = s[currentEnv] || {};
-  usernameInput.value = envCreds.email || '';
-  passwordInput.value = envCreds.password || '';
+  setActiveEnv(currentEnv, false);   // restores all per-env fields
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -105,57 +98,59 @@ let currentEnv = 'prod';
 
 function setActiveEnv(env, persist = true) {
   currentEnv = env;
-  envButtons.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.env === env);
-  });
+  envButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.env === env));
 
-  // Restore credentials for this env
+  // Restore all per-env fields
   const s = loadSettings();
-  const envCreds = s[env] || {};
-  usernameInput.value = envCreds.email || '';
-  passwordInput.value = envCreds.password || '';
+  const e = s[env] || {};
+  groupIdInput.value       = e.groupId       || '';
+  usernameInput.value      = e.email         || '';
+  passwordInput.value      = e.password      || '';
+  dispatcherUrlInput.value = e.dispatcherUrl || '';
+  ldUsernameInput.value    = e.ldEmail       || '';
+  ldPasswordInput.value    = e.ldPassword    || '';
 
-  if (persist) {
-    s.lastEnv = env;
-    saveSettings(s);
-  }
+  if (persist) { s.lastEnv = env; saveSettings(s); }
+  updateLoadFilesBtnState();
 }
 
 envButtons.forEach(btn => {
   btn.addEventListener('click', () => setActiveEnv(btn.dataset.env));
 });
 
-// Save credentials on change
-function persistCredentials() {
-  const s = loadSettings();
-  s[currentEnv] = { email: usernameInput.value, password: passwordInput.value };
-  // Invalidate server token cache for this env when credentials change
-  const prev = (s[currentEnv] || {});
-  if (prev.email !== usernameInput.value || prev.password !== passwordInput.value) {
+// Persist all per-env fields on any change
+function persistEnv() {
+  const s   = loadSettings();
+  const prev = s[currentEnv] || {};
+  const newEmail = usernameInput.value.trim();
+
+  // Invalidate server token cache when EAO credentials change
+  if (prev.email !== newEmail || prev.password !== passwordInput.value) {
     fetch('/api/invalidate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ env: currentEnv, email: usernameInput.value }),
+      body: JSON.stringify({ env: currentEnv, email: newEmail }),
     }).catch(() => {});
   }
-  s[currentEnv] = { email: usernameInput.value, password: passwordInput.value };
-  saveSettings(s);
-}
 
-usernameInput.addEventListener('change', persistCredentials);
-passwordInput.addEventListener('change', persistCredentials);
-groupIdInput.addEventListener('change', () => {
-  const s = loadSettings();
-  s.lastGroupId = groupIdInput.value.trim();
-  saveSettings(s);
-});
-
-dispatcherUrlInput.addEventListener('change', () => {
-  const s = loadSettings();
-  s.dispatcherUrl = dispatcherUrlInput.value.trim();
+  s[currentEnv] = {
+    groupId:       groupIdInput.value.trim(),
+    email:         newEmail,
+    password:      passwordInput.value,
+    dispatcherUrl: dispatcherUrlInput.value.trim(),
+    ldEmail:       ldUsernameInput.value.trim(),
+    ldPassword:    ldPasswordInput.value,
+  };
   saveSettings(s);
   updateLoadFilesBtnState();
-});
+}
+
+groupIdInput.addEventListener('change', persistEnv);
+usernameInput.addEventListener('change', persistEnv);
+passwordInput.addEventListener('change', persistEnv);
+dispatcherUrlInput.addEventListener('change', persistEnv);
+ldUsernameInput.addEventListener('change', persistEnv);
+ldPasswordInput.addEventListener('change', persistEnv);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  STATUS BAR
@@ -206,10 +201,7 @@ loadBtn.addEventListener('click', async () => {
   if (!password) return showStatus('Please enter a password.', 'error');
 
   // Persist before loading
-  persistCredentials();
-  const s = loadSettings();
-  s.lastGroupId = groupId;
-  saveSettings(s);
+  persistEnv();
 
   loadBtn.disabled = true;
   loadBtn.textContent = 'Loading…';
@@ -757,16 +749,25 @@ function setIfcStatus(tabId, msg) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function updateLoadFilesBtnState() {
-  loadFilesBtn.disabled = !(_groupLoaded && dispatcherUrlInput.value.trim());
+  loadFilesBtn.disabled = !(
+    _groupLoaded &&
+    dispatcherUrlInput.value.trim() &&
+    ldUsernameInput.value.trim() &&
+    ldPasswordInput.value
+  );
 }
 
 dispatcherUrlInput.addEventListener('input', updateLoadFilesBtnState);
+ldUsernameInput.addEventListener('input', updateLoadFilesBtnState);
+ldPasswordInput.addEventListener('input', updateLoadFilesBtnState);
 
 loadFilesBtn.addEventListener('click', async () => {
   const groupId       = groupIdInput.value.trim();
   const email         = usernameInput.value.trim();
   const password      = passwordInput.value;
   const dispatcherUrl = dispatcherUrlInput.value.trim();
+  const ldEmail       = ldUsernameInput.value.trim()    || email;    // fall back to EAO creds
+  const ldPassword    = ldPasswordInput.value           || password;
 
   if (!groupId || !email || !password) {
     showStatus('Load an elevator group first.', 'error');
@@ -791,7 +792,8 @@ loadFilesBtn.addEventListener('click', async () => {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        env: currentEnv, email, password, groupId, dispatcherUrl,
+        env: currentEnv, email, password, groupId,
+        dispatcherUrl, ldEmail, ldPassword,
         sheets: allSheetDefs,
       }),
     });
