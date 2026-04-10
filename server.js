@@ -313,22 +313,26 @@ app.post('/api/viewer/load', async (req, res) => {
       const b = await loadRes.text().catch(() => '');
       throw new Error(`Document/Load HTTP ${loadRes.status}: ${b.slice(0, 200)}`);
     }
-    log('✓ Document loaded on worker', 'success');
+    // Document/Load returns { id: documentId, slotId } — documentId is required for Sheet/Export
+    const loadJson  = await loadRes.json().catch(() => ({}));
+    const documentId = loadJson.id ?? loadJson.documentId ?? loadJson.Id ?? loadJson.DocumentId;
+    if (!documentId) throw new Error(`Document/Load: no documentId in response — got: ${JSON.stringify(loadJson).slice(0, 200)}`);
+    log(`✓ Document loaded on worker  (docId: ${documentId})`, 'success');
 
-    // ── 4b. List available sheets (diagnostic) ────────────────────────────────
+    // ── 4b. List available sheets ─────────────────────────────────────────────
     try {
       const sheetsListRes = await fetch(
-        `${workerUri}/api/Sheet/GetAll?slotId=${encodeURIComponent(slotId)}`,
+        `${workerUri}/api/Sheet/Get?slotId=${encodeURIComponent(slotId)}&documentId=${encodeURIComponent(documentId)}`,
         { headers: ldAuthHdr, signal: AbortSignal.timeout(15_000) }
       );
       if (sheetsListRes.ok) {
         const sheetsList = await sheetsListRes.json();
-        const names = (Array.isArray(sheetsList) ? sheetsList : sheetsList.sheets ?? sheetsList.value ?? [])
-          .map(s => s.zb_DESC ?? s.ZB_DESC ?? s.name ?? s.Name ?? JSON.stringify(s))
-          .join(', ');
+        const arr = Array.isArray(sheetsList) ? sheetsList : sheetsList.sheets ?? sheetsList.value ?? [];
+        const names = arr.map(s => s.designation ?? s.zb_DESC ?? s.ZB_DESC ?? s.sheeT_NAME ?? s.name ?? JSON.stringify(s)).join(', ');
         log(`Available sheets: ${names || '(none listed)'}`);
       } else {
-        log(`Sheet/GetAll HTTP ${sheetsListRes.status} (no sheet list)`, 'warning');
+        const b = await sheetsListRes.text().catch(() => '');
+        log(`Sheet/Get HTTP ${sheetsListRes.status}: ${b.slice(0, 200)}`, 'warning');
       }
     } catch (e) {
       log(`Sheet listing skipped: ${e.message}`, 'warning');
@@ -343,6 +347,7 @@ app.post('/api/viewer/load', async (req, res) => {
 
       const url = `${workerUri}/api/Sheet/Export` +
         `?slotId=${encodeURIComponent(slotId)}` +
+        `&documentId=${encodeURIComponent(documentId)}` +
         `&ZB_DESCs=${encodeURIComponent(sheet.name)}` +
         `&options.fileType=${fileType}` +
         `&options.primaryLCID=2057` +
@@ -352,7 +357,6 @@ app.post('/api/viewer/load', async (req, res) => {
       if (!exportRes.ok) {
         const errBody = await exportRes.text().catch(() => '');
         log(`  ${sheet.name}  — HTTP ${exportRes.status}: ${errBody.slice(0, 300)}`, 'warning');
-        log(`  Export URL: ${url}`, 'warning');
         results[sheet.name] = null;
         continue;
       }
