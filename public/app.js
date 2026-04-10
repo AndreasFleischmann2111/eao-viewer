@@ -15,13 +15,12 @@ function saveSettings(settings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-// settings structure:
+// settings structure (all per-environment):
 // {
 //   lastEnv: 'prod',
-//   lastGroupId: '...',
-//   dev:     { email: '', password: '' },
-//   staging: { email: '', password: '' },
-//   prod:    { email: '', password: '' },
+//   dev:     { email: '', password: '', groupId: '', dispatcherUrl: '' },
+//   staging: { ... },
+//   prod:    { ... },
 // }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -29,14 +28,66 @@ function saveSettings(settings) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const $ = id => document.getElementById(id);
-const groupIdInput = $('groupId');
-const usernameInput = $('username');
-const passwordInput = $('password');
-const loadBtn = $('loadBtn');
-const statusBar = $('statusBar');
-const envButtons = document.querySelectorAll('.env-btn');
+const groupIdInput       = $('groupId');
+const usernameInput      = $('username');
+const passwordInput      = $('password');
+const loadBtn            = $('loadBtn');
+const statusBar          = $('statusBar');
+const envButtons         = document.querySelectorAll('.env-btn');
+const dispatcherUrlInput = $('dispatcherUrl');
+const loadFilesBtn       = $('loadFilesBtn');
 
-let currentEnv = 'prod';
+// ═══════════════════════════════════════════════════════════════════════════
+//  RESIZABLE PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PANEL_WIDTH_KEY = 'eao-viewer-panel-width';
+const panelLeft    = $('panelLeft');
+const panelResizer = $('panelResizer');
+
+// Restore saved width
+const savedPanelWidth = localStorage.getItem(PANEL_WIDTH_KEY);
+if (savedPanelWidth) panelLeft.style.width = savedPanelWidth;
+
+let _resizing = false;
+
+panelResizer.addEventListener('mousedown', e => {
+  _resizing = true;
+  panelResizer.classList.add('resizing');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', e => {
+  if (!_resizing) return;
+  const layoutRect = panelLeft.parentElement.getBoundingClientRect();
+  const newWidth   = e.clientX - layoutRect.left;
+  const maxWidth   = layoutRect.width - 140;   // leave room for right panel
+  if (newWidth >= 280 && newWidth <= maxWidth) {
+    panelLeft.style.width = newWidth + 'px';
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (!_resizing) return;
+  _resizing = false;
+  panelResizer.classList.remove('resizing');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  localStorage.setItem(PANEL_WIDTH_KEY, panelLeft.style.width);
+});
+
+let currentEnv   = 'prod';
+let _groupLoaded = false;   // must be declared before init() calls updateLoadFilesBtnState()
+
+// ── Per-environment defaults (used when no saved value exists) ────────────
+const ENV_DEFAULTS = {
+  dev: {
+    groupId:       'a1Y9M00000HjtwDUAR',
+    dispatcherUrl: 'https://dev-dispatcher.digipara-ldoop.com/',
+  },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  INIT — restore saved settings
@@ -45,13 +96,7 @@ let currentEnv = 'prod';
 (function init() {
   const s = loadSettings();
   currentEnv = s.lastEnv || 'prod';
-  groupIdInput.value = s.lastGroupId || '';
-
-  setActiveEnv(currentEnv, false);
-
-  const envCreds = s[currentEnv] || {};
-  usernameInput.value = envCreds.email || '';
-  passwordInput.value = envCreds.password || '';
+  setActiveEnv(currentEnv, false);   // restores all per-env fields
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -60,50 +105,54 @@ let currentEnv = 'prod';
 
 function setActiveEnv(env, persist = true) {
   currentEnv = env;
-  envButtons.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.env === env);
-  });
+  envButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.env === env));
 
-  // Restore credentials for this env
-  const s = loadSettings();
-  const envCreds = s[env] || {};
-  usernameInput.value = envCreds.email || '';
-  passwordInput.value = envCreds.password || '';
+  // Restore all per-env fields (fall back to built-in defaults for known envs)
+  const s   = loadSettings();
+  const e   = s[env] || {};
+  const def = ENV_DEFAULTS[env] || {};
+  groupIdInput.value       = e.groupId       || def.groupId       || '';
+  usernameInput.value      = e.email         || '';
+  passwordInput.value      = e.password      || '';
+  dispatcherUrlInput.value = e.dispatcherUrl || def.dispatcherUrl || '';
 
-  if (persist) {
-    s.lastEnv = env;
-    saveSettings(s);
-  }
+  if (persist) { s.lastEnv = env; saveSettings(s); }
+  updateLoadFilesBtnState();
 }
 
 envButtons.forEach(btn => {
   btn.addEventListener('click', () => setActiveEnv(btn.dataset.env));
 });
 
-// Save credentials on change
-function persistCredentials() {
-  const s = loadSettings();
-  s[currentEnv] = { email: usernameInput.value, password: passwordInput.value };
-  // Invalidate server token cache for this env when credentials change
-  const prev = (s[currentEnv] || {});
-  if (prev.email !== usernameInput.value || prev.password !== passwordInput.value) {
+// Persist all per-env fields on any change
+function persistEnv() {
+  const s   = loadSettings();
+  const prev = s[currentEnv] || {};
+  const newEmail = usernameInput.value.trim();
+
+  // Invalidate server token cache when EAO credentials change
+  if (prev.email !== newEmail || prev.password !== passwordInput.value) {
     fetch('/api/invalidate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ env: currentEnv, email: usernameInput.value }),
+      body: JSON.stringify({ env: currentEnv, email: newEmail }),
     }).catch(() => {});
   }
-  s[currentEnv] = { email: usernameInput.value, password: passwordInput.value };
+
+  s[currentEnv] = {
+    groupId:       groupIdInput.value.trim(),
+    email:         newEmail,
+    password:      passwordInput.value,
+    dispatcherUrl: dispatcherUrlInput.value.trim(),
+  };
   saveSettings(s);
+  updateLoadFilesBtnState();
 }
 
-usernameInput.addEventListener('change', persistCredentials);
-passwordInput.addEventListener('change', persistCredentials);
-groupIdInput.addEventListener('change', () => {
-  const s = loadSettings();
-  s.lastGroupId = groupIdInput.value.trim();
-  saveSettings(s);
-});
+groupIdInput.addEventListener('change', persistEnv);
+usernameInput.addEventListener('change', persistEnv);
+passwordInput.addEventListener('change', persistEnv);
+dispatcherUrlInput.addEventListener('change', persistEnv);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  STATUS BAR
@@ -154,10 +203,7 @@ loadBtn.addEventListener('click', async () => {
   if (!password) return showStatus('Please enter a password.', 'error');
 
   // Persist before loading
-  persistCredentials();
-  const s = loadSettings();
-  s.lastGroupId = groupId;
-  saveSettings(s);
+  persistEnv();
 
   loadBtn.disabled = true;
   loadBtn.textContent = 'Loading…';
@@ -429,10 +475,13 @@ function renderGroupAndUnits(groupEx, units, supplierName, bank2StartSx) {
 
   function bankSection(bankUnits, bankNum) {
     const cards = bankUnits.map((u, i) => buildUnitCard(u, i)).join('');
-    if (!hasBanks) return `<div class="unit-columns">${cards}</div>`;
+    if (!hasBanks) {
+      // No banking — render without label
+      return `<div class="unit-columns-wrap"><div class="unit-columns">${cards}</div></div>`;
+    }
     return `
       <div class="bank-section">
-        <div class="bank-label">BANK ${bankNum}</div>
+        <div class="bank-label-vertical">BANK ${bankNum}</div>
         <div class="unit-columns">${cards}</div>
       </div>
     `;
@@ -460,4 +509,478 @@ function renderAll(data) {
     const bodyId = btn.getAttribute('aria-controls');
     document.getElementById(bodyId).style.maxHeight = 'none';
   });
+
+  // Enable Load Files once a group is loaded
+  _groupLoaded = true;
+  updateLoadFilesBtnState();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RIGHT PANEL — SVG Viewer
+// ═══════════════════════════════════════════════════════════════════════════
+
+class SvgViewer {
+  constructor(viewportEl) {
+    this.vp    = viewportEl;
+    this.svgEl = null;
+    this.scale = 1;
+    this.tx    = 0;
+    this.ty    = 0;
+    this._drag = null; // { x, y, tx, ty } while dragging
+
+    this._onWheel = this._onWheel.bind(this);
+    this._onDown  = this._onDown.bind(this);
+    this._onMove  = this._onMove.bind(this);
+    this._onUp    = this._onUp.bind(this);
+
+    this.vp.addEventListener('wheel', this._onWheel, { passive: false });
+    this.vp.addEventListener('mousedown', this._onDown);
+    document.addEventListener('mousemove', this._onMove);
+    document.addEventListener('mouseup',   this._onUp);
+    this.vp.style.cursor = 'grab';
+  }
+
+  /** Inject SVG string and fit to viewport. */
+  loadSvg(svgString) {
+    const parser = new DOMParser();
+    const doc    = parser.parseFromString(svgString, 'image/svg+xml');
+    const el     = doc.documentElement;
+
+    // Remove fixed dimensions so we control size via transform
+    el.removeAttribute('width');
+    el.removeAttribute('height');
+    el.style.cssText = 'position:absolute; top:0; left:0; transform-origin:0 0; max-width:none; max-height:none; pointer-events:none;';
+
+    // Clear placeholder + old SVG
+    this.vp.innerHTML = '';
+    this.vp.appendChild(el);
+    this.svgEl = el;
+
+    requestAnimationFrame(() => this.fitAll());
+  }
+
+  /** Fit SVG to viewport with padding. */
+  fitAll() {
+    if (!this.svgEl) return;
+    const vpRect = this.vp.getBoundingClientRect();
+    const vb     = this.svgEl.viewBox?.baseVal;
+    let svgW, svgH;
+
+    if (vb && vb.width > 0 && vb.height > 0) {
+      svgW = vb.width;
+      svgH = vb.height;
+    } else {
+      svgW = this.svgEl.width?.baseVal?.value  || 800;
+      svgH = this.svgEl.height?.baseVal?.value || 600;
+    }
+
+    const pad    = 20;
+    const scaleX = (vpRect.width  - pad * 2) / svgW;
+    const scaleY = (vpRect.height - pad * 2) / svgH;
+    this.scale   = Math.min(scaleX, scaleY);
+    this.tx      = (vpRect.width  - svgW * this.scale) / 2;
+    this.ty      = (vpRect.height - svgH * this.scale) / 2;
+    this._apply();
+  }
+
+  /** Zoom by factor, centred on (cx, cy) screen coordinates. */
+  zoom(factor, cx, cy) {
+    const newScale = Math.min(100, Math.max(0.01, this.scale * factor));
+    const r        = newScale / this.scale;
+    const rect     = this.vp.getBoundingClientRect();
+    const px       = cx != null ? cx - rect.left : rect.width  / 2;
+    const py       = cy != null ? cy - rect.top  : rect.height / 2;
+    this.tx  = px - r * (px - this.tx);
+    this.ty  = py - r * (py - this.ty);
+    this.scale = newScale;
+    this._apply();
+  }
+
+  _apply() {
+    if (this.svgEl) {
+      this.svgEl.style.transform = `translate(${this.tx}px,${this.ty}px) scale(${this.scale})`;
+    }
+  }
+
+  _onWheel(e) {
+    e.preventDefault();
+    this.zoom(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX, e.clientY);
+  }
+
+  _onDown(e) {
+    if (e.button !== 0) return;
+    this._drag = { x: e.clientX, y: e.clientY, tx: this.tx, ty: this.ty };
+    this.vp.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+
+  _onMove(e) {
+    if (!this._drag) return;
+    this.tx = this._drag.tx + (e.clientX - this._drag.x);
+    this.ty = this._drag.ty + (e.clientY - this._drag.y);
+    this._apply();
+  }
+
+  _onUp() {
+    if (!this._drag) return;
+    this._drag = null;
+    this.vp.style.cursor = 'grab';
+  }
+
+  destroy() {
+    this.vp.removeEventListener('wheel', this._onWheel);
+    this.vp.removeEventListener('mousedown', this._onDown);
+    document.removeEventListener('mousemove', this._onMove);
+    document.removeEventListener('mouseup',   this._onUp);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RIGHT PANEL — Tab System
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SVG_SHEETS = [
+  { tab: '2d-plan',    name: 'EAOSLOT-2D-PLAN',     label: '2D Plan' },
+  { tab: '2d-details', name: 'EAOSLOT-2D-DETAILS',  label: '2D Details' },
+  { tab: '2d-vert',    name: 'EAOSLOT-2D-VERTICAL', label: '2D Vertical' },
+];
+const IFC_SHEETS = [
+  { tab: 'lod100', name: 'EAOSLOT-LOD-100', label: 'LOD 100' },
+  { tab: 'lod200', name: 'EAOSLOT-LOD-200', label: 'LOD 200' },
+  { tab: 'lod300', name: 'EAOSLOT-LOD-300', label: 'LOD 300' },
+];
+const ALL_SHEETS = [...SVG_SHEETS, ...IFC_SHEETS];
+
+// Active instances
+const svgViewers  = {};  // { tabId: SvgViewer }
+const ifcInstances = {}; // { tabId: IfcViewer }
+const ifcData     = {};  // { tabId: ArrayBuffer }
+
+let activeTab = '2d-plan';
+
+document.querySelectorAll('.viewer-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const tabId = tab.dataset.tab;
+    if (tabId === activeTab) return;
+    activeTab = tabId;
+
+    document.querySelectorAll('.viewer-tab').forEach(t =>
+      t.classList.toggle('active', t.dataset.tab === tabId));
+    document.querySelectorAll('.viewer-pane').forEach(p =>
+      p.classList.toggle('active', p.id === `pane-${tabId}`));
+
+    // Lazy-init IFC viewer on first tab activation if data is ready
+    if (IFC_SHEETS.find(s => s.tab === tabId) && ifcData[tabId]) {
+      initIfcPane(tabId);
+    }
+
+    // Re-fit SVG if it has content (viewport may have been resized)
+    if (svgViewers[tabId]) {
+      requestAnimationFrame(() => svgViewers[tabId].fitAll());
+    }
+  });
+});
+
+// ── Toolbar button delegation ──────────────────────────────────────────────
+document.querySelectorAll('.viewer-pane').forEach(pane => {
+  const toolbar = pane.querySelector('.viewer-toolbar');
+  if (!toolbar) return;
+  toolbar.addEventListener('click', e => {
+    const btn = e.target.closest('.vt-btn');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const tabId  = pane.id.replace('pane-', '');
+
+    if (action === 'zoom-in')  svgViewers[tabId]?.zoom(1.3);
+    if (action === 'zoom-out') svgViewers[tabId]?.zoom(1 / 1.3);
+    if (action === 'fit-all') {
+      svgViewers[tabId]?.fitAll();
+      ifcInstances[tabId]?.fitAll();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RIGHT PANEL — IFC Viewer init
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function initIfcPane(tabId) {
+  if (ifcInstances[tabId]) return; // already initialised
+
+  const vp = $(`ifc-${tabId}`);
+  if (!vp || !ifcData[tabId]) return;
+
+  // Check the IFC bundle has loaded (it's type="module" so loads async)
+  if (!window.IfcViewer) {
+    setIfcStatus(tabId, 'IFC viewer module loading, please try again…');
+    return;
+  }
+
+  setIfcStatus(tabId, 'Initialising viewer…');
+  vp.querySelector('.viewer-placeholder')?.remove();
+
+  const viewer = new window.IfcViewer(vp);
+  ifcInstances[tabId] = viewer;
+
+  try {
+    await viewer.init();
+    await viewer.loadIfc(ifcData[tabId], msg => {
+      if (msg) {
+        setIfcStatus(tabId, msg);
+      } else {
+        setIfcStatus(tabId, '');
+        // Enable "Fit All" button
+        const fitBtn = $(`pane-${tabId}`)?.querySelector('[data-action="fit-all"]');
+        if (fitBtn) fitBtn.disabled = false;
+      }
+    });
+  } catch (err) {
+    setIfcStatus(tabId, `Error: ${err.message}`);
+  }
+}
+
+function setIfcStatus(tabId, msg) {
+  const el = $(`ifcstatus-${tabId}`);
+  if (el) el.textContent = msg || '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  LOG PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+const logEntriesEl = $('logEntries');
+const logCountEl   = $('logCount');
+const logPanelEl   = $('logPanel');
+const logResizerEl = $('logResizer');
+let   _logCount    = 0;
+
+// ── Log panel vertical resize ──────────────────────────────────────────────
+const LOG_HEIGHT_KEY = 'eao_logHeight';
+const LOG_HEIGHT_DEFAULT = 150;
+
+(function initLogResize() {
+  // Restore saved height
+  const saved = parseInt(localStorage.getItem(LOG_HEIGHT_KEY), 10);
+  if (saved && saved >= 60) logPanelEl.style.height = saved + 'px';
+
+  let startY = 0;
+  let startH = 0;
+
+  logResizerEl.addEventListener('mousedown', e => {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = logPanelEl.getBoundingClientRect().height;
+    logResizerEl.classList.add('log-resizer--dragging');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!logResizerEl.classList.contains('log-resizer--dragging')) return;
+    // Dragging up = larger log (mouse moves up = delta is negative = height increases)
+    const delta = startY - e.clientY;
+    const newH  = Math.max(60, Math.min(window.innerHeight * 0.8, startH + delta));
+    logPanelEl.style.height = newH + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!logResizerEl.classList.contains('log-resizer--dragging')) return;
+    logResizerEl.classList.remove('log-resizer--dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Persist
+    const h = Math.round(logPanelEl.getBoundingClientRect().height);
+    localStorage.setItem(LOG_HEIGHT_KEY, h);
+  });
+})();
+
+function clearLog() {
+  logEntriesEl.innerHTML = '';
+  _logCount = 0;
+  logCountEl.textContent = '0 entries';
+}
+
+function appendLog(entry) {
+  // Remove "no entries" placeholder
+  logEntriesEl.querySelector('.log-empty')?.remove();
+
+  _logCount++;
+  logCountEl.textContent = `${_logCount} ${_logCount === 1 ? 'entry' : 'entries'}`;
+
+  const row  = document.createElement('div');
+  row.className = 'log-entry';
+
+  const timeEl = document.createElement('span');
+  timeEl.className  = 'log-time';
+  timeEl.textContent = entry.time || '';
+
+  const msgEl = document.createElement('span');
+  msgEl.className  = `log-msg log-msg--${entry.level || 'info'}`;
+  msgEl.textContent = entry.msg || '';
+
+  row.appendChild(timeEl);
+  row.appendChild(msgEl);
+  logEntriesEl.appendChild(row);
+
+  // Auto-scroll to latest
+  logEntriesEl.scrollTop = logEntriesEl.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RIGHT PANEL — Load Files Button
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateLoadFilesBtnState() {
+  loadFilesBtn.disabled = !(_groupLoaded && dispatcherUrlInput.value.trim());
+}
+
+dispatcherUrlInput.addEventListener('input', updateLoadFilesBtnState);
+
+loadFilesBtn.addEventListener('click', async () => {
+  const groupId       = groupIdInput.value.trim();
+  const email         = usernameInput.value.trim();
+  const password      = passwordInput.value;
+  const dispatcherUrl = dispatcherUrlInput.value.trim();
+
+  if (!groupId || !email || !password) {
+    showStatus('Load an elevator group first.', 'error');
+    return;
+  }
+  if (!dispatcherUrl) {
+    showStatus('Enter a Dispatcher URL.', 'error');
+    return;
+  }
+
+  loadFilesBtn.disabled = true;
+  loadFilesBtn.innerHTML = '<img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" /> Loading…';
+  hideStatus();
+  clearLog();
+
+  let results = {};
+
+  try {
+    const allSheetDefs = ALL_SHEETS.map(s => ({
+      name: s.name,
+      type: IFC_SHEETS.find(i => i.tab === s.tab) ? 'ifc' : 'svg',
+    }));
+
+    const response = await fetch('/api/viewer/load', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        env: currentEnv, email, password, groupId,
+        dispatcherUrl,
+        sheets: allSheetDefs,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    // ── Read NDJSON stream — each line is a log entry or the final result ───
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   resultMsg = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete lines
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === 'log') {
+            appendLog(msg);
+          } else if (msg.type === 'result') {
+            resultMsg = msg;
+          }
+        } catch { /* ignore malformed lines */ }
+      }
+    }
+
+    if (!resultMsg?.ok) {
+      throw new Error(resultMsg?.error || 'Unknown error from server');
+    }
+
+    results = resultMsg.results ?? {};
+
+    // ── Inject SVG sheets ──────────────────────────────────────────────────
+    for (const sheet of SVG_SHEETS) {
+      const b64 = results[sheet.name];
+      const vp  = $(`svg-${sheet.tab}`);
+      if (!vp) continue;
+
+      if (!b64) {
+        vp.innerHTML = `<div class="viewer-placeholder">
+          <img src="/assets/icons/circle-info.svg" alt="" />
+          Sheet "${sheet.name}" not available.
+        </div>`;
+        continue;
+      }
+
+      const svgString = atob(b64);
+
+      // Create or reuse SvgViewer
+      if (svgViewers[sheet.tab]) {
+        svgViewers[sheet.tab].destroy();
+        delete svgViewers[sheet.tab];
+      }
+      svgViewers[sheet.tab] = new SvgViewer(vp);
+      svgViewers[sheet.tab].loadSvg(svgString);
+    }
+
+    // ── Store IFC data; init viewer if that tab is active ──────────────────
+    for (const sheet of IFC_SHEETS) {
+      const b64 = results[sheet.name];
+      if (!b64) {
+        const vp = $(`ifc-${sheet.tab}`);
+        if (vp) vp.innerHTML = `<div class="viewer-placeholder">
+          <img src="/assets/icons/circle-info.svg" alt="" />
+          Sheet "${sheet.name}" not available.
+        </div>`;
+        continue;
+      }
+
+      // Dispose existing viewer if reloading
+      if (ifcInstances[sheet.tab]) {
+        ifcInstances[sheet.tab].dispose();
+        delete ifcInstances[sheet.tab];
+        const vp = $(`ifc-${sheet.tab}`);
+        if (vp) vp.innerHTML = '';
+      }
+
+      // Decode base64 → ArrayBuffer
+      const raw = atob(b64);
+      const buf = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+      ifcData[sheet.tab] = buf.buffer;
+
+      // Add placeholder back until viewer inits
+      const vp = $(`ifc-${sheet.tab}`);
+      if (vp) vp.innerHTML = `<div class="viewer-placeholder">
+        <img src="/assets/icons/circle-info.svg" alt="" />
+        Click the tab to initialise 3D viewer.
+      </div>`;
+
+      // If this tab is currently active, init now
+      if (activeTab === sheet.tab) initIfcPane(sheet.tab);
+    }
+
+  } catch (err) {
+    showStatus(`Load Files error: ${err.message}`, 'error');
+    appendLog({ time: new Date().toLocaleTimeString('de-AT', { hour12: false }), msg: `✗ ${err.message}`, level: 'error' });
+  } finally {
+    loadFilesBtn.disabled = false;
+    loadFilesBtn.innerHTML = '<img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" /> Load Files';
+    updateLoadFilesBtnState();
+  }
+});
