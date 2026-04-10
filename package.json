@@ -5,9 +5,18 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "node scripts/build.mjs",
+    "postinstall": "node scripts/copy-assets.mjs && node scripts/build.mjs"
   },
   "dependencies": {
     "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@thatopen/components": "3.3.3",
+    "@thatopen/fragments": "3.3.7",
+    "esbuild": "^0.24.0",
+    "three": "^0.183.2",
+    "web-ifc": "~0.0.77"
   }
 }

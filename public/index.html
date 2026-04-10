@@ -10,7 +10,7 @@
 <body>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     HEADER
+     HEADER  (full width)
 ════════════════════════════════════════════════════════════════════════════ -->
 <header class="eao-header">
   <div class="eao-header-logo">
@@ -20,13 +20,11 @@
 
   <div class="eao-header-controls">
 
-    <!-- Elevator Group ID -->
     <div class="ctrl-group">
       <label class="ctrl-label">Elevator Group ID</label>
       <input id="groupId" type="text" class="ctrl-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
     </div>
 
-    <!-- Environment selector -->
     <div class="ctrl-group">
       <label class="ctrl-label">Environment</label>
       <div class="env-buttons">
@@ -36,7 +34,6 @@
       </div>
     </div>
 
-    <!-- Credentials -->
     <div class="ctrl-group">
       <label class="ctrl-label">Username</label>
       <input id="username" type="email" class="ctrl-input" placeholder="user@example.com" />
@@ -46,7 +43,6 @@
       <input id="password" type="password" class="ctrl-input" placeholder="••••••••" />
     </div>
 
-    <!-- Load -->
     <div class="ctrl-group ctrl-group--action">
       <button id="loadBtn" class="load-btn">
         <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
@@ -63,64 +59,215 @@
 <div id="statusBar" class="status-bar hidden"></div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     MAIN CONTENT — 3 EXPANDERS
+     TWO-COLUMN LAYOUT
 ════════════════════════════════════════════════════════════════════════════ -->
-<main class="eao-main">
+<div class="app-layout">
 
-  <!-- ── Expander 1: Site & Building ───────────────────────────────────────── -->
-  <section class="expander" id="exp-site">
-    <button class="expander-header" aria-expanded="true" aria-controls="exp-site-body">
-      <span class="expander-icon-wrap">
-        <img src="/assets/icons/site.svg" alt="" class="exp-icon" />
-        <img src="/assets/icons/building.svg" alt="" class="exp-icon" />
-      </span>
-      <span class="expander-title">Site &amp; Building</span>
-      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
-    </button>
-    <div class="expander-body" id="exp-site-body">
-      <div id="site-content" class="expander-placeholder">
-        <img src="/assets/icons/circle-info.svg" alt="" />
-        Load an elevator group to view site &amp; building details.
+  <!-- ── Left panel: 3 expanders ──────────────────────────────────────────── -->
+  <div class="panel-left" id="panelLeft">
+    <main class="eao-main">
+
+      <!-- Expander 1: Site & Building -->
+      <section class="expander" id="exp-site">
+        <button class="expander-header" aria-expanded="true" aria-controls="exp-site-body">
+          <span class="expander-icon-wrap">
+            <img src="/assets/icons/site.svg" alt="" class="exp-icon" />
+            <img src="/assets/icons/building.svg" alt="" class="exp-icon" />
+          </span>
+          <span class="expander-title">Site &amp; Building</span>
+          <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+        </button>
+        <div class="expander-body" id="exp-site-body">
+          <div id="site-content" class="expander-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load an elevator group to view site &amp; building details.
+          </div>
+        </div>
+      </section>
+
+      <!-- Expander 2: Floor Levels -->
+      <section class="expander" id="exp-floors">
+        <button class="expander-header" aria-expanded="true" aria-controls="exp-floors-body">
+          <span class="expander-icon-wrap">
+            <img src="/assets/icons/building-entrance.svg" alt="" class="exp-icon" />
+          </span>
+          <span class="expander-title">Floor Levels</span>
+          <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+        </button>
+        <div class="expander-body" id="exp-floors-body">
+          <div id="floors-content" class="expander-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load an elevator group to view floor levels.
+          </div>
+        </div>
+      </section>
+
+      <!-- Expander 3: Elevator Group & Units -->
+      <section class="expander" id="exp-group">
+        <button class="expander-header" aria-expanded="true" aria-controls="exp-group-body">
+          <span class="expander-icon-wrap">
+            <img src="/assets/icons/elevator-group.svg" alt="" class="exp-icon" />
+          </span>
+          <span class="expander-title">Elevator Group &amp; Units</span>
+          <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+        </button>
+        <div class="expander-body" id="exp-group-body">
+          <div id="group-content" class="expander-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load an elevator group to view group &amp; unit details.
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── Resizer handle ───────────────────────────────────────────────────── -->
+  <div class="panel-resizer" id="panelResizer">
+    <div class="panel-resizer-grip"></div>
+  </div>
+
+  <!-- ── Right panel: drawings viewer ────────────────────────────────────── -->
+  <div class="panel-right" id="panelRight">
+
+    <!-- Viewer header: dispatcher URL + Load Files button -->
+    <div class="viewer-header">
+      <div class="ctrl-group" style="flex:1; min-width:0;">
+        <label class="ctrl-label">Dispatcher URL</label>
+        <input id="dispatcherUrl" type="text" class="ctrl-input ctrl-input--full"
+               placeholder="https://dispatcher.example.com" />
+      </div>
+      <div class="ctrl-group ctrl-group--action">
+        <button id="loadFilesBtn" class="load-btn" disabled>
+          <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
+          Load Files
+        </button>
       </div>
     </div>
-  </section>
 
-  <!-- ── Expander 2: Floor Levels ───────────────────────────────────────────── -->
-  <section class="expander" id="exp-floors">
-    <button class="expander-header" aria-expanded="true" aria-controls="exp-floors-body">
-      <span class="expander-icon-wrap">
-        <img src="/assets/icons/building-entrance.svg" alt="" class="exp-icon" />
-      </span>
-      <span class="expander-title">Floor Levels</span>
-      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
-    </button>
-    <div class="expander-body" id="exp-floors-body">
-      <div id="floors-content" class="expander-placeholder">
-        <img src="/assets/icons/circle-info.svg" alt="" />
-        Load an elevator group to view floor levels.
-      </div>
+    <!-- Tab bar -->
+    <div class="viewer-tabs" id="viewerTabs">
+      <button class="viewer-tab active" data-tab="2d-plan">2D Plan</button>
+      <button class="viewer-tab" data-tab="2d-details">2D Details</button>
+      <button class="viewer-tab" data-tab="2d-vert">2D Vertical</button>
+      <div class="viewer-tab-sep"></div>
+      <button class="viewer-tab" data-tab="lod100">LOD 100</button>
+      <button class="viewer-tab" data-tab="lod200">LOD 200</button>
+      <button class="viewer-tab" data-tab="lod300">LOD 300</button>
     </div>
-  </section>
 
-  <!-- ── Expander 3: Elevator Group & Units ─────────────────────────────────── -->
-  <section class="expander" id="exp-group">
-    <button class="expander-header" aria-expanded="true" aria-controls="exp-group-body">
-      <span class="expander-icon-wrap">
-        <img src="/assets/icons/elevator-group.svg" alt="" class="exp-icon" />
-      </span>
-      <span class="expander-title">Elevator Group &amp; Units</span>
-      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
-    </button>
-    <div class="expander-body" id="exp-group-body">
-      <div id="group-content" class="expander-placeholder">
-        <img src="/assets/icons/circle-info.svg" alt="" />
-        Load an elevator group to view group &amp; unit details.
+    <!-- Viewer body — panes stacked, one visible at a time -->
+    <div class="viewer-body" id="viewerBody">
+
+      <!-- ── SVG pane: 2D Plan ─────────────────────────────────────────────── -->
+      <div class="viewer-pane active" id="pane-2d-plan">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="zoom-in"  title="Zoom In">+</button>
+          <button class="vt-btn" data-action="zoom-out" title="Zoom Out">−</button>
+          <button class="vt-btn" data-action="fit-all"  title="Zoom All">⛶</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-2D-PLAN</span>
+        </div>
+        <div class="svg-viewport" id="svg-2d-plan">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the 2D Plan drawing.
+          </div>
+        </div>
       </div>
-    </div>
-  </section>
 
-</main>
+      <!-- ── SVG pane: 2D Details ──────────────────────────────────────────── -->
+      <div class="viewer-pane" id="pane-2d-details">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="zoom-in"  title="Zoom In">+</button>
+          <button class="vt-btn" data-action="zoom-out" title="Zoom Out">−</button>
+          <button class="vt-btn" data-action="fit-all"  title="Zoom All">⛶</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-2D-DETAILS</span>
+        </div>
+        <div class="svg-viewport" id="svg-2d-details">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the 2D Details drawing.
+          </div>
+        </div>
+      </div>
 
+      <!-- ── SVG pane: 2D Vertical ─────────────────────────────────────────── -->
+      <div class="viewer-pane" id="pane-2d-vert">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="zoom-in"  title="Zoom In">+</button>
+          <button class="vt-btn" data-action="zoom-out" title="Zoom Out">−</button>
+          <button class="vt-btn" data-action="fit-all"  title="Zoom All">⛶</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-2D-VERTICAL</span>
+        </div>
+        <div class="svg-viewport" id="svg-2d-vert">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the 2D Vertical drawing.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── IFC pane: LOD 100 ─────────────────────────────────────────────── -->
+      <div class="viewer-pane" id="pane-lod100">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="fit-all" title="Fit All" disabled>⛶ Fit All</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-LOD-100</span>
+          <span class="vt-spacer"></span>
+          <span class="vt-status" id="ifcstatus-lod100"></span>
+        </div>
+        <div class="ifc-viewport" id="ifc-lod100">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the LOD 100 3D model.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── IFC pane: LOD 200 ─────────────────────────────────────────────── -->
+      <div class="viewer-pane" id="pane-lod200">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="fit-all" title="Fit All" disabled>⛶ Fit All</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-LOD-200</span>
+          <span class="vt-spacer"></span>
+          <span class="vt-status" id="ifcstatus-lod200"></span>
+        </div>
+        <div class="ifc-viewport" id="ifc-lod200">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the LOD 200 3D model.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── IFC pane: LOD 300 ─────────────────────────────────────────────── -->
+      <div class="viewer-pane" id="pane-lod300">
+        <div class="viewer-toolbar">
+          <button class="vt-btn" data-action="fit-all" title="Fit All" disabled>⛶ Fit All</button>
+          <span class="vt-sep"></span>
+          <span class="vt-sheetname">EAOSLOT-LOD-300</span>
+          <span class="vt-spacer"></span>
+          <span class="vt-status" id="ifcstatus-lod300"></span>
+        </div>
+        <div class="ifc-viewport" id="ifc-lod300">
+          <div class="viewer-placeholder">
+            <img src="/assets/icons/circle-info.svg" alt="" />
+            Load files to view the LOD 300 3D model.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.viewer-body -->
+  </div><!-- /.panel-right -->
+
+</div><!-- /.app-layout -->
+
+<!-- IFC viewer bundle (ESM, sets window.IfcViewer when loaded) -->
+<script type="module" src="/ifc-viewer.bundle.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

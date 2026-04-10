@@ -1,10 +1,24 @@
 'use strict';
 
+// LDWorker instances use self-signed TLS certificates on raw IP addresses.
+// This must be set before any HTTPS requests are made.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const express = require('express');
 const path    = require('path');
 
 const app = express();
 app.use(express.json());
+
+// ─── COOP / COEP headers ─────────────────────────────────────────────────────
+// Required for SharedArrayBuffer (used by web-ifc WASM in the IFC viewer).
+// Must be set on all responses served to the browser.
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy',   'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Environment base URLs ───────────────────────────────────────────────────
@@ -127,7 +141,6 @@ app.post('/api/load', async (req, res) => {
     const allUnits    = Array.isArray(allUnitsRaw) ? allUnitsRaw : (allUnitsRaw?.units ?? []);
 
     // Build floorFlags map per unit: { floorLevelId → bitmask }
-    // Matched to building floor levels by ID. flags[0] & 0x1 = front, & 0x2 = rear.
     const units = allUnits.map(u => {
       const { requirements, ...rest } = u;
       const floorReq  = (requirements ?? []).find(r => Array.isArray(r.floorLevels));
@@ -143,8 +156,6 @@ app.post('/api/load', async (req, res) => {
     });
 
     // ── 7. Parse bank settings from ElevatorGroup settings JSON ──────────────
-    //       settings is a JSON string, e.g. {"SHAFTS_MODE":1,"BANK_2_START_SX":3,...}
-    //       BANK_2_START_SX = first sx (shaft index) that belongs to Bank 2.
     let bank2StartSx = null;
     const settingsRaw = groupEx.settings ?? group.settings;
     if (settingsRaw) {
@@ -170,6 +181,142 @@ app.post('/api/load', async (req, res) => {
 
   } catch (err) {
     // If the token we cached is stale, drop it so next call re-authenticates
+    const key = `${env}:${email}`;
+    if (err.message.includes('401') || err.message.includes('Login failed')) {
+      tokenCache.delete(key);
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Viewer file loader (LDWorker orchestration) ──────────────────────────────
+//
+// Flow:
+//   1. Download LD3 from EAO  →  GET /api/ElevatorGroup/PrepareFileDownload
+//   2. Open LDWorker slot     →  POST {dispatcherUrl}/api/Slot/Open
+//   3. Upload LD3 to worker   →  POST {workerBaseURI}/api/Document/Load?slotId=
+//   4. Export each sheet      →  GET  {workerBaseURI}/api/Sheet/Export?...
+//   5. Close slot             →  DELETE {dispatcherUrl}/api/Slot/Close?...
+//
+// Returns base64-encoded file data for each requested sheet.
+//
+// NOTE: The EAO LD3 download endpoint is /api/ElevatorGroup/PrepareFileDownload.
+//       Adjust if the actual endpoint differs in your environment.
+//
+app.post('/api/viewer/load', async (req, res) => {
+  const { env, email, password, groupId, dispatcherUrl, sheets } = req.body;
+
+  if (!env || !email || !password || !groupId || !dispatcherUrl || !Array.isArray(sheets)) {
+    return res.status(400).json({ error: 'env, email, password, groupId, dispatcherUrl, sheets are required' });
+  }
+  if (!BASE_URLS[env]) {
+    return res.status(400).json({ error: `Unknown environment: ${env}` });
+  }
+
+  let slotId       = null;
+  let workerUri    = null;
+  let dispatchBase = dispatcherUrl.replace(/\/$/, ''); // strip trailing slash
+
+  try {
+    const token = await getToken(env, email, password);
+    const base  = BASE_URLS[env];
+    const authHdr = { Authorization: `Bearer ${token}` };
+
+    // ── 1. Download LD3 from EAO ──────────────────────────────────────────────
+    const ld3Res = await fetch(
+      `${base}/api/ElevatorGroup/PrepareFileDownload?elevatorGroupId=${encodeURIComponent(groupId)}`,
+      { headers: { ...authHdr, Accept: 'application/octet-stream' }, signal: AbortSignal.timeout(90_000) }
+    );
+    if (!ld3Res.ok) {
+      const b = await ld3Res.text().catch(() => '');
+      throw new Error(`EAO PrepareFileDownload HTTP ${ld3Res.status}: ${b.slice(0, 200)}`);
+    }
+    const ld3Buffer = Buffer.from(await ld3Res.arrayBuffer());
+
+    // ── 2. Open dispatcher slot ───────────────────────────────────────────────
+    const slotRes = await fetch(`${dispatchBase}/api/Slot/Open`, {
+      method:  'POST',
+      headers: { ...authHdr, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ region: 'eu-central-1', forHumanUser: true, killAfterIdleSeconds: 240 }),
+      signal:  AbortSignal.timeout(15_000),
+    });
+    if (!slotRes.ok) {
+      const b = await slotRes.text().catch(() => '');
+      throw new Error(`Slot/Open HTTP ${slotRes.status}: ${b.slice(0, 200)}`);
+    }
+    const slotJson = await slotRes.json();
+    slotId    = slotJson.slotId   ?? slotJson.SlotId;
+    workerUri = (slotJson.workerBaseURI ?? slotJson.workerUri ?? slotJson.WorkerBaseURI ?? '').replace(/\/$/, '');
+
+    if (!slotId)    throw new Error('Slot/Open: no slotId in response');
+    if (!workerUri) throw new Error('Slot/Open: no workerBaseURI in response');
+
+    // ── 3. Upload LD3 to worker ────────────────────────────────────────────────
+    // slotId must be in the URL query string (not in the form body)
+    const formData = new FormData();
+    formData.append('file', new Blob([ld3Buffer], { type: 'application/octet-stream' }), 'model.ld3');
+
+    const loadRes = await fetch(`${workerUri}/api/Document/Load?slotId=${encodeURIComponent(slotId)}`, {
+      method:  'POST',
+      headers: authHdr,   // do NOT set Content-Type — let FormData set the multipart boundary
+      body:    formData,
+      signal:  AbortSignal.timeout(60_000),
+    });
+    if (!loadRes.ok) {
+      const b = await loadRes.text().catch(() => '');
+      throw new Error(`Document/Load HTTP ${loadRes.status}: ${b.slice(0, 200)}`);
+    }
+
+    // ── 4. Export each sheet ──────────────────────────────────────────────────
+    const results = {};
+
+    for (const sheet of sheets) {
+      const fileType = sheet.type === 'ifc' ? 20 : 18;  // 18 = SVG, 20 = IFC 4.0
+      const url = `${workerUri}/api/Sheet/Export` +
+        `?slotId=${encodeURIComponent(slotId)}` +
+        `&ZB_DESCs=${encodeURIComponent(sheet.name)}` +
+        `&options.fileType=${fileType}` +
+        `&options.primaryLCID=2057` +   // English UK
+        `&options.options=0`;
+
+      const exportRes = await fetch(url, { headers: authHdr, signal: AbortSignal.timeout(60_000) });
+      if (!exportRes.ok) {
+        // Non-fatal: sheet may not exist; record empty result
+        results[sheet.name] = null;
+        continue;
+      }
+      const buf = Buffer.from(await exportRes.arrayBuffer());
+
+      // Sniff content type — SVG export sometimes returns application/octet-stream
+      const snippet = buf.slice(0, 512).toString('utf8');
+      const isSvg   = snippet.trimStart().startsWith('<') && snippet.includes('<svg');
+      const isIfc   = snippet.trimStart().startsWith('ISO-10303');
+
+      if ((sheet.type === 'svg' && !isSvg) || (sheet.type === 'ifc' && !isIfc && buf.length < 1000)) {
+        results[sheet.name] = null;  // empty or wrong format
+      } else {
+        results[sheet.name] = buf.toString('base64');
+      }
+    }
+
+    // ── 5. Close slot ─────────────────────────────────────────────────────────
+    // workerBaseURI is required in query string (Slot/Close will fail without it)
+    await fetch(
+      `${dispatchBase}/api/Slot/Close?slotId=${encodeURIComponent(slotId)}&workerBaseURI=${encodeURIComponent(workerUri)}`,
+      { method: 'DELETE', headers: authHdr, signal: AbortSignal.timeout(15_000) }
+    ).catch(e => console.warn('Slot/Close failed (non-fatal):', e.message));
+
+    res.json({ ok: true, results });
+
+  } catch (err) {
+    // Best-effort slot cleanup on error
+    if (slotId && workerUri) {
+      fetch(
+        `${dispatchBase}/api/Slot/Close?slotId=${encodeURIComponent(slotId)}&workerBaseURI=${encodeURIComponent(workerUri)}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${req.body.password ? 'cached' : ''}` } }
+      ).catch(() => {});
+    }
+
     const key = `${env}:${email}`;
     if (err.message.includes('401') || err.message.includes('Login failed')) {
       tokenCache.delete(key);

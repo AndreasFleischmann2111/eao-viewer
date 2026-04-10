@@ -1,2 +1,6 @@
 node_modules/
 .claude/
+public/ifc-viewer.bundle.js
+public/web-ifc.wasm
+public/web-ifc-mt.wasm
+public/fragments.worker.js
