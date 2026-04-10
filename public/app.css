@@ -363,6 +363,79 @@ body {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   LOG PANEL
+════════════════════════════════════════════════════════════════════════════ */
+.log-panel {
+  flex-shrink: 0;
+  height: 150px;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--dp-eao-dark-accent, #6d2077);
+  background: #fafafa;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: var(--dp-eao-dark, #343a40);
+  flex-shrink: 0;
+}
+
+.log-title {
+  font-size: 11px;
+  font-weight: var(--eao-ft-bold, 700);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+
+.log-count {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  font-style: italic;
+}
+
+.log-entries {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  scroll-behavior: smooth;
+}
+
+.log-empty {
+  padding: 6px 12px;
+  color: var(--dp-font-unconsidered, #94979a);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 2px 12px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.log-entry:hover { background: rgba(0,0,0,0.03); }
+
+.log-time {
+  flex-shrink: 0;
+  color: var(--dp-eao-font-gray, #9a9a9a);
+  user-select: none;
+  min-width: 58px;
+}
+
+.log-msg { flex: 1; word-break: break-all; }
+.log-msg--info    { color: var(--dp-font-default, #343a40); }
+.log-msg--success { color: #2a7d2a; }
+.log-msg--warning { color: #b86c00; }
+.log-msg--error   { color: var(--dp-eao-condition-alert, #eb0e58); font-weight: var(--eao-ft-semibold, 600); }
+
+/* ════════════════════════════════════════════════════════════════════════════
    VIEWER PLACEHOLDER (empty/loading state inside panes)
 ════════════════════════════════════════════════════════════════════════════ */
 .viewer-placeholder {

@@ -78,7 +78,16 @@ document.addEventListener('mouseup', () => {
   localStorage.setItem(PANEL_WIDTH_KEY, panelLeft.style.width);
 });
 
-let currentEnv = 'prod';
+let currentEnv   = 'prod';
+let _groupLoaded = false;   // must be declared before init() calls updateLoadFilesBtnState()
+
+// ── Per-environment defaults (used when no saved value exists) ────────────
+const ENV_DEFAULTS = {
+  dev: {
+    groupId:       'a1Y9M00000HjtwDUAR',
+    dispatcherUrl: 'https://dev-dispatcher.digipara-ldoop.com/',
+  },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  INIT — restore saved settings
@@ -98,13 +107,14 @@ function setActiveEnv(env, persist = true) {
   currentEnv = env;
   envButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.env === env));
 
-  // Restore all per-env fields
-  const s = loadSettings();
-  const e = s[env] || {};
-  groupIdInput.value       = e.groupId       || '';
+  // Restore all per-env fields (fall back to built-in defaults for known envs)
+  const s   = loadSettings();
+  const e   = s[env] || {};
+  const def = ENV_DEFAULTS[env] || {};
+  groupIdInput.value       = e.groupId       || def.groupId       || '';
   usernameInput.value      = e.email         || '';
   passwordInput.value      = e.password      || '';
-  dispatcherUrlInput.value = e.dispatcherUrl || '';
+  dispatcherUrlInput.value = e.dispatcherUrl || def.dispatcherUrl || '';
 
   if (persist) { s.lastEnv = env; saveSettings(s); }
   updateLoadFilesBtnState();
@@ -488,8 +498,6 @@ function renderGroupAndUnits(groupEx, units, supplierName, bank2StartSx) {
 //  RENDER ALL
 // ═══════════════════════════════════════════════════════════════════════════
 
-let _groupLoaded = false;
-
 function renderAll(data) {
   renderSiteBuilding(data.site, data.building);
   renderFloorLevels(data.floorLevels, data.units, data.bank2StartSx);
@@ -737,6 +745,46 @@ function setIfcStatus(tabId, msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  LOG PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+const logEntriesEl = $('logEntries');
+const logCountEl   = $('logCount');
+let   _logCount    = 0;
+
+function clearLog() {
+  logEntriesEl.innerHTML = '';
+  _logCount = 0;
+  logCountEl.textContent = '0 entries';
+}
+
+function appendLog(entry) {
+  // Remove "no entries" placeholder
+  logEntriesEl.querySelector('.log-empty')?.remove();
+
+  _logCount++;
+  logCountEl.textContent = `${_logCount} ${_logCount === 1 ? 'entry' : 'entries'}`;
+
+  const row  = document.createElement('div');
+  row.className = 'log-entry';
+
+  const timeEl = document.createElement('span');
+  timeEl.className  = 'log-time';
+  timeEl.textContent = entry.time || '';
+
+  const msgEl = document.createElement('span');
+  msgEl.className  = `log-msg log-msg--${entry.level || 'info'}`;
+  msgEl.textContent = entry.msg || '';
+
+  row.appendChild(timeEl);
+  row.appendChild(msgEl);
+  logEntriesEl.appendChild(row);
+
+  // Auto-scroll to latest
+  logEntriesEl.scrollTop = logEntriesEl.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  RIGHT PANEL — Load Files Button
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -763,7 +811,10 @@ loadFilesBtn.addEventListener('click', async () => {
 
   loadFilesBtn.disabled = true;
   loadFilesBtn.innerHTML = '<img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" /> Loading…';
-  showStatus('Downloading drawings from LDWorker…', 'info');
+  hideStatus();
+  clearLog();
+
+  let results = {};
 
   try {
     const allSheetDefs = ALL_SHEETS.map(s => ({
@@ -771,7 +822,7 @@ loadFilesBtn.addEventListener('click', async () => {
       type: IFC_SHEETS.find(i => i.tab === s.tab) ? 'ifc' : 'svg',
     }));
 
-    const res  = await fetch('/api/viewer/load', {
+    const response = await fetch('/api/viewer/load', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
@@ -780,12 +831,45 @@ loadFilesBtn.addEventListener('click', async () => {
         sheets: allSheetDefs,
       }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-    hideStatus();
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+    }
 
-    const results = data.results ?? {};
+    // ── Read NDJSON stream — each line is a log entry or the final result ───
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   resultMsg = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete lines
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === 'log') {
+            appendLog(msg);
+          } else if (msg.type === 'result') {
+            resultMsg = msg;
+          }
+        } catch { /* ignore malformed lines */ }
+      }
+    }
+
+    if (!resultMsg?.ok) {
+      throw new Error(resultMsg?.error || 'Unknown error from server');
+    }
+
+    results = resultMsg.results ?? {};
 
     // ── Inject SVG sheets ──────────────────────────────────────────────────
     for (const sheet of SVG_SHEETS) {
@@ -851,6 +935,7 @@ loadFilesBtn.addEventListener('click', async () => {
 
   } catch (err) {
     showStatus(`Load Files error: ${err.message}`, 'error');
+    appendLog({ time: new Date().toLocaleTimeString('de-AT', { hour12: false }), msg: `✗ ${err.message}`, level: 'error' });
   } finally {
     loadFilesBtn.disabled = false;
     loadFilesBtn.innerHTML = '<img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" /> Load Files';

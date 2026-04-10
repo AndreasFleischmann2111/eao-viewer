@@ -213,16 +213,38 @@ app.post('/api/viewer/load', async (req, res) => {
     return res.status(400).json({ error: `Unknown environment: ${env}` });
   }
 
+  // ── Stream NDJSON so the client receives log lines in real-time ───────────
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  function logTime() {
+    return new Date().toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  }
+  function log(msg, level = 'info') {
+    res.write(JSON.stringify({ type: 'log', time: logTime(), msg, level }) + '\n');
+  }
+  function finish(payload) {
+    res.write(JSON.stringify({ type: 'result', ...payload }) + '\n');
+    res.end();
+  }
+
   let slotId       = null;
   let workerUri    = null;
-  let dispatchBase = dispatcherUrl.replace(/\/$/, ''); // strip trailing slash
+  let ldAuthHdr    = null;
+  const dispatchBase = dispatcherUrl.replace(/\/$/, '');
 
   try {
+    // ── 1. Authenticate ───────────────────────────────────────────────────────
+    log('Authenticating with EAO…');
     const token = await getToken(env, email, password);
     const base  = BASE_URLS[env];
     const authHdr = { Authorization: `Bearer ${token}` };
+    ldAuthHdr = authHdr;
+    log('✓ Authenticated', 'success');
 
-    // ── 1. Download LD3 from EAO ──────────────────────────────────────────────
+    // ── 2. Download LD3 from EAO ──────────────────────────────────────────────
+    log(`Downloading LD3 from EAO (${env.toUpperCase()})…`);
     const ld3Res = await fetch(
       `${base}/api/ElevatorGroup/PrepareFileDownload?elevatorGroupId=${encodeURIComponent(groupId)}`,
       { headers: { ...authHdr, Accept: 'application/octet-stream' }, signal: AbortSignal.timeout(90_000) }
@@ -232,11 +254,10 @@ app.post('/api/viewer/load', async (req, res) => {
       throw new Error(`EAO PrepareFileDownload HTTP ${ld3Res.status}: ${b.slice(0, 200)}`);
     }
     const ld3Buffer = Buffer.from(await ld3Res.arrayBuffer());
+    log(`✓ LD3 downloaded  (${(ld3Buffer.length / 1024).toFixed(1)} KB)`, 'success');
 
-    // LDWorker uses the same EAO JWT token
-    const ldAuthHdr = authHdr;
-
-    // ── 2. Open dispatcher slot ───────────────────────────────────────────────
+    // ── 3. Open dispatcher slot ───────────────────────────────────────────────
+    log('Opening dispatcher slot…');
     const slotRes = await fetch(`${dispatchBase}/api/Slot/Open`, {
       method:  'POST',
       headers: { ...ldAuthHdr, 'Content-Type': 'application/json' },
@@ -254,14 +275,17 @@ app.post('/api/viewer/load', async (req, res) => {
     if (!slotId)    throw new Error('Slot/Open: no slotId in response');
     if (!workerUri) throw new Error('Slot/Open: no workerBaseURI in response');
 
-    // ── 3. Upload LD3 to worker ────────────────────────────────────────────────
-    // slotId must be in the URL query string (not in the form body)
+    log(`✓ Slot opened  →  ${slotId}`, 'success');
+    log(`Worker URI  →  ${workerUri}`);
+
+    // ── 4. Upload LD3 to worker ────────────────────────────────────────────────
+    log('Uploading LD3 to worker…');
     const formData = new FormData();
     formData.append('file', new Blob([ld3Buffer], { type: 'application/octet-stream' }), 'model.ld3');
 
     const loadRes = await fetch(`${workerUri}/api/Document/Load?slotId=${encodeURIComponent(slotId)}`, {
       method:  'POST',
-      headers: ldAuthHdr, // do NOT set Content-Type — let FormData set the multipart boundary
+      headers: ldAuthHdr,
       body:    formData,
       signal:  AbortSignal.timeout(60_000),
     });
@@ -269,62 +293,68 @@ app.post('/api/viewer/load', async (req, res) => {
       const b = await loadRes.text().catch(() => '');
       throw new Error(`Document/Load HTTP ${loadRes.status}: ${b.slice(0, 200)}`);
     }
+    log('✓ Document loaded on worker', 'success');
 
-    // ── 4. Export each sheet ──────────────────────────────────────────────────
+    // ── 5. Export each sheet ──────────────────────────────────────────────────
     const results = {};
 
     for (const sheet of sheets) {
-      const fileType = sheet.type === 'ifc' ? 20 : 18;  // 18 = SVG, 20 = IFC 4.0
+      const fileType = sheet.type === 'ifc' ? 20 : 18;
+      log(`Exporting  ${sheet.name}  (${sheet.type.toUpperCase()})…`);
+
       const url = `${workerUri}/api/Sheet/Export` +
         `?slotId=${encodeURIComponent(slotId)}` +
         `&ZB_DESCs=${encodeURIComponent(sheet.name)}` +
         `&options.fileType=${fileType}` +
-        `&options.primaryLCID=2057` +   // English UK
+        `&options.primaryLCID=2057` +
         `&options.options=0`;
 
       const exportRes = await fetch(url, { headers: ldAuthHdr, signal: AbortSignal.timeout(60_000) });
       if (!exportRes.ok) {
-        // Non-fatal: sheet may not exist; record empty result
+        log(`  ${sheet.name}  — not available (HTTP ${exportRes.status})`, 'warning');
         results[sheet.name] = null;
         continue;
       }
       const buf = Buffer.from(await exportRes.arrayBuffer());
 
-      // Sniff content type — SVG export sometimes returns application/octet-stream
       const snippet = buf.slice(0, 512).toString('utf8');
       const isSvg   = snippet.trimStart().startsWith('<') && snippet.includes('<svg');
       const isIfc   = snippet.trimStart().startsWith('ISO-10303');
 
       if ((sheet.type === 'svg' && !isSvg) || (sheet.type === 'ifc' && !isIfc && buf.length < 1000)) {
-        results[sheet.name] = null;  // empty or wrong format
+        log(`  ${sheet.name}  — empty or wrong format`, 'warning');
+        results[sheet.name] = null;
       } else {
         results[sheet.name] = buf.toString('base64');
+        log(`✓ ${sheet.name}  (${(buf.length / 1024).toFixed(1)} KB)`, 'success');
       }
     }
 
-    // ── 5. Close slot ─────────────────────────────────────────────────────────
-    // workerBaseURI is required in query string (Slot/Close will fail without it)
+    // ── 6. Close slot ─────────────────────────────────────────────────────────
+    log('Closing dispatcher slot…');
     await fetch(
       `${dispatchBase}/api/Slot/Close?slotId=${encodeURIComponent(slotId)}&workerBaseURI=${encodeURIComponent(workerUri)}`,
       { method: 'DELETE', headers: ldAuthHdr, signal: AbortSignal.timeout(15_000) }
-    ).catch(e => console.warn('Slot/Close failed (non-fatal):', e.message));
+    ).catch(e => { log(`  Slot/Close warning: ${e.message}`, 'warning'); });
+    log('✓ Slot closed', 'success');
 
-    res.json({ ok: true, results });
+    finish({ ok: true, results });
 
   } catch (err) {
-    // Best-effort slot cleanup on error
-    if (slotId && workerUri) {
+    log(`✗ ${err.message}`, 'error');
+
+    // Best-effort slot cleanup
+    if (slotId && workerUri && ldAuthHdr) {
       fetch(
         `${dispatchBase}/api/Slot/Close?slotId=${encodeURIComponent(slotId)}&workerBaseURI=${encodeURIComponent(workerUri)}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${req.body.password ? 'cached' : ''}` } }
+        { method: 'DELETE', headers: ldAuthHdr }
       ).catch(() => {});
     }
 
     const key = `${env}:${email}`;
-    if (err.message.includes('401') || err.message.includes('Login failed')) {
-      tokenCache.delete(key);
-    }
-    res.status(500).json({ error: err.message });
+    if (err.message.includes('401') || err.message.includes('Login failed')) tokenCache.delete(key);
+
+    finish({ ok: false, error: err.message });
   }
 });
 
