@@ -204,15 +204,11 @@ app.post('/api/load', async (req, res) => {
 //       Adjust if the actual endpoint differs in your environment.
 //
 app.post('/api/viewer/load', async (req, res) => {
-  const { env, email, password, groupId, dispatcherUrl, ldEmail, ldPassword, sheets } = req.body;
+  const { env, email, password, groupId, dispatcherUrl, sheets } = req.body;
 
   if (!env || !email || !password || !groupId || !dispatcherUrl || !Array.isArray(sheets)) {
     return res.status(400).json({ error: 'env, email, password, groupId, dispatcherUrl, sheets are required' });
   }
-
-  // LD credentials — fall back to EAO credentials if not provided
-  const ldUser = ldEmail    || email;
-  const ldPass = ldPassword || password;
   if (!BASE_URLS[env]) {
     return res.status(400).json({ error: `Unknown environment: ${env}` });
   }
@@ -237,13 +233,10 @@ app.post('/api/viewer/load', async (req, res) => {
     }
     const ld3Buffer = Buffer.from(await ld3Res.arrayBuffer());
 
-    // ── 2. Open dispatcher slot (uses LD credentials, not EAO token) ─────────
-    const ldToken = await getToken(env, ldUser, ldPass).catch(async () => {
-      // If LD has same auth server as EAO, reuse the EAO token fetch result
-      return token;
-    });
-    const ldAuthHdr = { Authorization: `Bearer ${ldToken}` };
+    // LDWorker uses the same EAO JWT token
+    const ldAuthHdr = authHdr;
 
+    // ── 2. Open dispatcher slot ───────────────────────────────────────────────
     const slotRes = await fetch(`${dispatchBase}/api/Slot/Open`, {
       method:  'POST',
       headers: { ...ldAuthHdr, 'Content-Type': 'application/json' },
