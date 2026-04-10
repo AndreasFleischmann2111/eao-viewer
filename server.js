@@ -319,17 +319,22 @@ app.post('/api/viewer/load', async (req, res) => {
     if (!documentId) throw new Error(`Document/Load: no documentId in response — got: ${JSON.stringify(loadJson).slice(0, 200)}`);
     log(`✓ Document loaded on worker  (docId: ${documentId})`, 'success');
 
-    // ── 4b. List available sheets ─────────────────────────────────────────────
+    // ── 4b. Fetch available sheet list — used to resolve full sheet names ────────
+    //  The actual designation may be prefixed, e.g. "TKE_EOX_EAOSLOT-2D-PLAN".
+    //  We match by finding whichever sheet's designation *contains* our target key.
+    let availableSheets = [];
     try {
       const sheetsListRes = await fetch(
         `${workerUri}/api/Sheet/Get?slotId=${encodeURIComponent(slotId)}&documentId=${encodeURIComponent(documentId)}`,
         { headers: ldAuthHdr, signal: AbortSignal.timeout(15_000) }
       );
       if (sheetsListRes.ok) {
-        const sheetsList = await sheetsListRes.json();
-        const arr = Array.isArray(sheetsList) ? sheetsList : sheetsList.sheets ?? sheetsList.value ?? [];
-        const names = arr.map(s => s.designation ?? s.zb_DESC ?? s.ZB_DESC ?? s.sheeT_NAME ?? s.name ?? JSON.stringify(s)).join(', ');
-        log(`Available sheets: ${names || '(none listed)'}`);
+        const raw = await sheetsListRes.json();
+        availableSheets = Array.isArray(raw) ? raw : raw.sheets ?? raw.value ?? [];
+        const names = availableSheets
+          .map(s => s.designation ?? s.zb_DESC ?? s.ZB_DESC ?? s.sheeT_NAME ?? s.name ?? '?')
+          .join(', ');
+        log(`Available sheets: ${names || '(none)'}`);
       } else {
         const b = await sheetsListRes.text().catch(() => '');
         log(`Sheet/Get HTTP ${sheetsListRes.status}: ${b.slice(0, 200)}`, 'warning');
@@ -338,17 +343,33 @@ app.post('/api/viewer/load', async (req, res) => {
       log(`Sheet listing skipped: ${e.message}`, 'warning');
     }
 
+    // Helper: resolve the full designation for a target key, e.g. "EAOSLOT-2D-PLAN"
+    // Returns the full name if found in the sheet list, otherwise falls back to the key itself.
+    function resolveSheetName(key) {
+      if (!availableSheets.length) return key;
+      const keyUpper = key.toUpperCase();
+      const match = availableSheets.find(s => {
+        const d = (s.designation ?? s.zb_DESC ?? s.ZB_DESC ?? s.sheeT_NAME ?? s.name ?? '').toUpperCase();
+        return d.includes(keyUpper);
+      });
+      return match
+        ? (match.designation ?? match.zb_DESC ?? match.ZB_DESC ?? match.sheeT_NAME ?? match.name ?? key)
+        : key;
+    }
+
     // ── 5. Export each sheet ──────────────────────────────────────────────────
     const results = {};
 
     for (const sheet of sheets) {
-      const fileType = sheet.type === 'ifc' ? 20 : 18;
-      log(`Exporting  ${sheet.name}  (${sheet.type.toUpperCase()})…`);
+      const fileType   = sheet.type === 'ifc' ? 20 : 18;
+      const fullName   = resolveSheetName(sheet.name);
+      const displayName = fullName !== sheet.name ? `${fullName} (→ ${sheet.name})` : fullName;
+      log(`Exporting  ${displayName}  (${sheet.type.toUpperCase()})…`);
 
       const url = `${workerUri}/api/Sheet/Export` +
         `?slotId=${encodeURIComponent(slotId)}` +
         `&documentId=${encodeURIComponent(documentId)}` +
-        `&ZB_DESCs=${encodeURIComponent(sheet.name)}` +
+        `&ZB_DESCs=${encodeURIComponent(fullName)}` +
         `&options.fileType=${fileType}` +
         `&options.primaryLCID=2057` +
         `&options.options=0`;
@@ -356,7 +377,7 @@ app.post('/api/viewer/load', async (req, res) => {
       const exportRes = await fetch(url, { headers: ldAuthHdr, signal: AbortSignal.timeout(60_000) });
       if (!exportRes.ok) {
         const errBody = await exportRes.text().catch(() => '');
-        log(`  ${sheet.name}  — HTTP ${exportRes.status}: ${errBody.slice(0, 300)}`, 'warning');
+        log(`  ${fullName}  — HTTP ${exportRes.status}: ${errBody.slice(0, 300)}`, 'warning');
         results[sheet.name] = null;
         continue;
       }
@@ -367,11 +388,11 @@ app.post('/api/viewer/load', async (req, res) => {
       const isIfc   = snippet.trimStart().startsWith('ISO-10303');
 
       if ((sheet.type === 'svg' && !isSvg) || (sheet.type === 'ifc' && !isIfc && buf.length < 1000)) {
-        log(`  ${sheet.name}  — empty or wrong format`, 'warning');
+        log(`  ${fullName}  — empty or wrong format`, 'warning');
         results[sheet.name] = null;
       } else {
         results[sheet.name] = buf.toString('base64');
-        log(`✓ ${sheet.name}  (${(buf.length / 1024).toFixed(1)} KB)`, 'success');
+        log(`✓ ${fullName}  (${(buf.length / 1024).toFixed(1)} KB)`, 'success');
       }
     }
 
