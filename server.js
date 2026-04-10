@@ -111,16 +111,50 @@ app.post('/api/load', async (req, res) => {
     // ── 4. ElevatorGroup extended (with units[]) ───────────────────────────────
     const groupEx = await eaoFetch(`${base}/api/ElevatorGroup/GetInformationEx?elevatorGroupId=${encodeURIComponent(groupId)}`);
 
-    // ── 5. Each ElevatorUnit (full spec incl. floorLevels) ─────────────────────
-    const unitRefs = (groupEx.units ?? []);
-    const units    = await Promise.all(
-      unitRefs.map(u => {
-        const id = u.elevatorUnitId ?? u.id;
-        return eaoFetch(`${base}/api/ElevatorUnit/Get?elevatorUnitId=${encodeURIComponent(id)}`);
-      })
-    );
+    // ── 5. Floor levels — taken from SiteBuilding/Get response ───────────────
+    //       Keep the id so the frontend can match against unit floor level flags.
+    const rawFLs = building.floorLevels ?? building.FloorLevels ?? [];
+    const floorLevels = rawFLs.map(f => ({
+      id:   f.id    ?? f.ID,
+      ix:   f.ix    ?? f.IX    ?? f.index ?? 0,
+      desc: f.desc  ?? f.DESC  ?? f.description ?? '',
+      dz:   f.dz    ?? f.DZ    ?? 0,
+      zPot: f.z_POT ?? f.Z_POT ?? f.zPot ?? 0,
+    }));
 
-    // ── 6. Resolve supplier name via contract ──────────────────────────────────
+    // ── 6. All units via GetAll (dimensions + per-floor service flags) ─────────
+    const allUnitsRaw = await eaoFetch(`${base}/api/ElevatorUnit/GetAll?parentElevatorGroupId=${encodeURIComponent(groupId)}`);
+    const allUnits    = Array.isArray(allUnitsRaw) ? allUnitsRaw : (allUnitsRaw?.units ?? []);
+
+    // Build floorFlags map per unit: { floorLevelId → bitmask }
+    // Matched to building floor levels by ID. flags[0] & 0x1 = front, & 0x2 = rear.
+    const units = allUnits.map(u => {
+      const { requirements, ...rest } = u;
+      const floorReq  = (requirements ?? []).find(r => Array.isArray(r.floorLevels));
+      const floorFlags = {};
+      for (const fl of (floorReq?.floorLevels ?? [])) {
+        const id = fl.id ?? fl.ID;
+        if (id) {
+          const bits = Array.isArray(fl.flags) ? (fl.flags[0] ?? 0) : (fl.flags ?? 0);
+          floorFlags[id] = bits;
+        }
+      }
+      return { ...rest, floorFlags };
+    });
+
+    // ── 7. Parse bank settings from ElevatorGroup settings JSON ──────────────
+    //       settings is a JSON string, e.g. {"SHAFTS_MODE":1,"BANK_2_START_SX":3,...}
+    //       BANK_2_START_SX = first sx (shaft index) that belongs to Bank 2.
+    let bank2StartSx = null;
+    const settingsRaw = groupEx.settings ?? group.settings;
+    if (settingsRaw) {
+      try {
+        const s = typeof settingsRaw === 'string' ? JSON.parse(settingsRaw) : settingsRaw;
+        if (s.BANK_2_START_SX != null) bank2StartSx = s.BANK_2_START_SX;
+      } catch { /* non-fatal */ }
+    }
+
+    // ── 8. Resolve supplier name via contract ──────────────────────────────────
     let supplierName = null;
     const contractId = groupEx.supplierId ?? group.supplierId;
     if (contractId) {
@@ -132,7 +166,7 @@ app.post('/api/load', async (req, res) => {
       }
     }
 
-    res.json({ site, building, group, groupEx, units, supplierName });
+    res.json({ site, building, group, groupEx, units, floorLevels, bank2StartSx, supplierName });
 
   } catch (err) {
     // If the token we cached is stale, drop it so next call re-authenticates

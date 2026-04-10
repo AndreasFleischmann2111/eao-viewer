@@ -208,46 +208,6 @@ function infoTable(rows) {
   return `<table class="info-table"><tbody>${rows.join('')}</tbody></table>`;
 }
 
-// Interpret service flag bits: 0x1=front, 0x2=rear
-function serviceFlag(flags) {
-  // flags may be: null, [], [number], [obj], number
-  let bits = null;
-
-  if (flags == null) return '<span class="flag-none">—</span>';
-  if (typeof flags === 'number') {
-    bits = flags;
-  } else if (Array.isArray(flags)) {
-    if (flags.length === 0) return '<span class="flag-none">—</span>';
-    const first = flags[0];
-    if (typeof first === 'number') bits = first;
-    else if (typeof first === 'object' && first !== null) {
-      // Try common field names
-      bits = first.value ?? first.flags ?? first.mask ?? first.flag ?? null;
-    }
-  }
-
-  if (bits == null) return `<span class="flag-raw" title="${esc(JSON.stringify(flags))}">?</span>`;
-
-  const front = !!(bits & 0x1);
-  const rear  = !!(bits & 0x2);
-
-  if (front && rear)  return '<span class="flag-badge flag-both">F+R</span>';
-  if (front)          return '<span class="flag-badge flag-front">F</span>';
-  if (rear)           return '<span class="flag-badge flag-rear">R</span>';
-  return '<span class="flag-none">—</span>';
-}
-
-// Normalize floor level from EAO .NET format
-function normalizeFL(fl) {
-  return {
-    id:   fl.id   ?? fl.ID,
-    ix:   fl.IX   ?? fl.ix   ?? 0,
-    desc: fl.DESC ?? fl.desc ?? '',
-    dz:   fl.DZ   ?? fl.dz   ?? 0,
-    zPot: fl.Z_POT ?? fl.z_POT ?? 0,
-    flags: fl.Flags ?? fl.flags ?? null,
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  RENDER — Site & Building
@@ -299,71 +259,98 @@ function renderSiteBuilding(site, building) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  RENDER — Floor Levels
+//  Building floor levels (rows) matched to unit service flags by floor ID.
+//  Per unit: FRONT column always shown; REAR column only if unit has rear service.
+//  If bank2StartSx is set, a bank separator is inserted in the column headers.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function renderFloorLevels(units) {
+function renderFloorLevels(floorLevels, units, bank2StartSx) {
   const el = $('floors-content');
 
-  // Collect all floor levels from all units and build an index by ix
-  // Master list from unit 0; align others by ix
-  if (!units || units.length === 0) {
-    el.innerHTML = '<p class="expander-placeholder">No unit data available.</p>';
+  if (!floorLevels || floorLevels.length === 0) {
+    el.innerHTML = '<p class="expander-placeholder"><img src="/assets/icons/circle-info.svg" alt="" />No floor level data available.</p>';
     return;
   }
 
-  // Build per-unit floor level maps: ix → normalised FL
-  const unitFLMaps = units.map(u => {
-    const fls = (u.floorLevels ?? []).map(normalizeFL);
-    const map = new Map();
-    fls.forEach(fl => map.set(fl.ix, fl));
-    return map;
+  // Highest floor first
+  const sorted = [...floorLevels].sort((a, b) => b.ix - a.ix);
+
+  // Determine per-unit column config
+  const unitCols = (units ?? []).map(u => {
+    const hasRear = Object.values(u.floorFlags ?? {}).some(bits => !!(bits & 0x2));
+    const sx      = u.sx ?? u.shaftIndex ?? null;
+    const bank    = (bank2StartSx != null && sx != null && sx >= bank2StartSx) ? 2 : 1;
+    return { unit: u, hasRear, bank };
   });
 
-  // Master floor list = union of all ix values, sorted ascending
-  const allIx = new Set();
-  unitFLMaps.forEach(m => m.forEach((_, ix) => allIx.add(ix)));
-  const sortedIx = [...allIx].sort((a, b) => a - b);
-
-  if (sortedIx.length === 0) {
-    el.innerHTML = '<p class="expander-placeholder">No floor level data available.</p>';
-    return;
+  // ── Header row 1: bank labels + unit titles ───────────────────────────────
+  // Inject a bank-separator <th> before the first Bank 2 unit
+  let bankHeaderHtml = '';
+  let prevBank = 0;
+  for (const { unit, hasRear, bank } of unitCols) {
+    if (bank !== prevBank) {
+      // bank label spanning all columns of that bank
+      const bankColSpan = unitCols
+        .filter(c => c.bank === bank)
+        .reduce((s, c) => s + (c.hasRear ? 2 : 1), 0);
+      bankHeaderHtml += `<th colspan="${bankColSpan}" class="fl-bank-header">BANK ${bank}</th>`;
+      prevBank = bank;
+    }
   }
 
-  // Desc from first unit that has this ix
-  const masterDesc = ix => {
-    for (const m of unitFLMaps) {
-      const fl = m.get(ix);
-      if (fl?.desc) return fl.desc;
-    }
-    return '';
-  };
-  const masterDZ = ix => {
-    for (const m of unitFLMaps) {
-      const fl = m.get(ix);
-      if (fl?.dz != null) return fl.dz;
-    }
-    return 0;
-  };
+  const unitGroupHeaders = unitCols.map(({ unit, hasRear }) => {
+    const span  = hasRear ? 2 : 1;
+    const title = esc(unit.title ?? unit.elevatorUnitId ?? '');
+    return `<th colspan="${span}" class="fl-unit-group-header">${title}</th>`;
+  }).join('');
 
-  // Header
-  const unitHeaders = units
-    .map((u, i) => `<th class="fl-unit-header">${esc(u.title ?? u.elevatorUnitId ?? `Unit ${i + 1}`)}</th>`)
-    .join('');
+  const unitSubHeaders = unitCols.map(({ hasRear }) =>
+    `<th class="fl-sub-header">FRONT</th>${hasRear ? '<th class="fl-sub-header">REAR</th>' : ''}`
+  ).join('');
 
-  // Rows
-  const rows = sortedIx.map(ix => {
-    const desc = masterDesc(ix);
-    const dz   = masterDZ(ix);
-    const unitCells = units.map((_, i) => {
-      const fl   = unitFLMaps[i].get(ix);
-      const html = fl ? serviceFlag(fl.flags) : '<span class="flag-none">—</span>';
-      return `<td class="fl-flag-cell">${html}</td>`;
+  // Use 3-row header when banks exist, 2-row otherwise
+  const hasBanks    = bank2StartSx != null && unitCols.some(c => c.bank === 2);
+  const floorColSpan = hasBanks ? 'rowspan="3"' : 'rowspan="2"';
+
+  const theadHtml = hasBanks ? `
+    <tr>
+      <th ${floorColSpan}>Description</th>
+      <th ${floorColSpan}>DZ</th>
+      <th ${floorColSpan}>Level (IX)</th>
+      <th ${floorColSpan}>z_POT (mm)</th>
+      ${bankHeaderHtml}
+    </tr>
+    <tr>${unitGroupHeaders}</tr>
+    <tr>${unitSubHeaders}</tr>
+  ` : `
+    <tr>
+      <th rowspan="2">Description</th>
+      <th rowspan="2">DZ</th>
+      <th rowspan="2">Level (IX)</th>
+      <th rowspan="2">z_POT (mm)</th>
+      ${unitGroupHeaders}
+    </tr>
+    <tr>${unitSubHeaders}</tr>
+  `;
+
+  // ── Rows ──────────────────────────────────────────────────────────────────
+  const rows = sorted.map(f => {
+    const unitCells = unitCols.map(({ unit, hasRear }) => {
+      const bits  = (unit.floorFlags ?? {})[f.id] ?? null;
+      const front = bits !== null ? !!(bits & 0x1) : false;
+      const rear  = bits !== null ? !!(bits & 0x2) : false;
+      const frontCell = `<td class="fl-flag-cell">${front ? '<span class="fl-check">✓</span>' : '<span class="fl-uncheck"></span>'}</td>`;
+      const rearCell  = hasRear
+        ? `<td class="fl-flag-cell">${rear  ? '<span class="fl-check">✓</span>' : '<span class="fl-uncheck"></span>'}</td>`
+        : '';
+      return frontCell + rearCell;
     }).join('');
 
     return `<tr>
-      <td class="fl-desc">${esc(desc)}</td>
-      <td class="fl-dz">${esc(dz)}</td>
-      <td class="fl-ix">${esc(ix)}</td>
+      <td class="fl-desc">${esc(f.desc)}</td>
+      <td class="fl-dz">${esc(f.dz)}</td>
+      <td class="fl-ix">${esc(f.ix)}</td>
+      <td class="fl-zpot">${f.zPot != null ? f.zPot.toLocaleString('de-AT') : '—'}</td>
       ${unitCells}
     </tr>`;
   }).join('');
@@ -371,22 +358,10 @@ function renderFloorLevels(units) {
   el.innerHTML = `
     <div class="fl-table-wrap">
       <table class="fl-table">
-        <thead>
-          <tr>
-            <th>Description</th>
-            <th>DZ</th>
-            <th>Level (IX)</th>
-            ${unitHeaders}
-          </tr>
-        </thead>
+        <thead>${theadHtml}</thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="fl-legend">
-      <span class="flag-badge flag-front">F</span> Front (0x1) &nbsp;
-      <span class="flag-badge flag-rear">R</span> Rear (0x2) &nbsp;
-      <span class="flag-badge flag-both">F+R</span> Both (0x3)
-    </p>
   `;
 }
 
@@ -394,10 +369,40 @@ function renderFloorLevels(units) {
 //  RENDER — Elevator Group & Units
 // ═══════════════════════════════════════════════════════════════════════════
 
-function renderGroupAndUnits(groupEx, units, supplierName) {
+function buildUnitCard(u, i) {
+  const unitRows = [
+    row('Unit ID',      u.elevatorUnitId ?? u.id),
+    row('Shaft Index',  u.sx ?? u.shaftIndex),
+    row('Model',        u.elevatorSupplierModelTitle ?? u.model),
+    row('Payload',      u.payload, 'kg'),
+    row('Speed',        u.speed, 'm/s'),
+    row('Floors',       u.floors),
+    row('Travel Height',u.travelHeight, 'mm'),
+    row('Shaft W×D',    u.shaftWidth && u.shaftDepth ? `${u.shaftWidth} × ${u.shaftDepth}` : null, 'mm'),
+    row('Shaft Height', u.shaftHeight, 'mm'),
+    row('Car W×D',      u.carWidth && u.carDepth ? `${u.carWidth} × ${u.carDepth}` : null, 'mm'),
+    row('Car Height',   u.carHeight, 'mm'),
+    row('Door W×H',     u.doorWidth && u.doorHeight ? `${u.doorWidth} × ${u.doorHeight}` : null, 'mm'),
+    row('Pit',          u.pit, 'mm'),
+    row('Head',         u.head, 'mm'),
+    row('Machine Room', u.mrLess != null ? (u.mrLess ? 'MRL (no room)' : 'With machine room') : null),
+  ].filter(r => !r.includes('val-empty'));
+
+  return `
+    <div class="info-card unit-card">
+      <div class="info-card-header unit-card-header">
+        <img src="/assets/icons/add-elevator-unit.svg" alt="" class="info-card-icon" />
+        <span>${esc(u.title ?? `Unit ${i + 1}`)}</span>
+      </div>
+      ${unitRows.length ? infoTable(unitRows) : '<p class="val-empty">No unit details available.</p>'}
+    </div>
+  `;
+}
+
+function renderGroupAndUnits(groupEx, units, supplierName, bank2StartSx) {
   const el = $('group-content');
 
-  // ── Group summary ────────────────────────────────────────────────────────
+  // ── Group summary ─────────────────────────────────────────────────────────
   const groupRows = [
     row('Group ID',    groupEx.elevatorGroupId ?? groupEx.id),
     row('Title',       groupEx.title ?? groupEx.name),
@@ -417,39 +422,26 @@ function renderGroupAndUnits(groupEx, units, supplierName) {
     </div>
   `;
 
-  // ── Unit columns ─────────────────────────────────────────────────────────
-  const unitCards = units.map((u, i) => {
-    const unitRows = [
-      row('Unit ID',      u.elevatorUnitId ?? u.id),
-      row('Model',        u.elevatorSupplierModelTitle ?? u.model),
-      row('Payload',      u.payload, 'kg'),
-      row('Speed',        u.speed, 'm/s'),
-      row('Floors',       u.floors),
-      row('Travel Height',u.travelHeight, 'mm'),
-      row('Shaft W×D',    u.shaftWidth && u.shaftDepth ? `${u.shaftWidth} × ${u.shaftDepth}` : null, 'mm'),
-      row('Shaft Height', u.shaftHeight, 'mm'),
-      row('Car W×D',      u.carWidth && u.carDepth ? `${u.carWidth} × ${u.carDepth}` : null, 'mm'),
-      row('Car Height',   u.carHeight, 'mm'),
-      row('Door W×H',     u.doorWidth && u.doorHeight ? `${u.doorWidth} × ${u.doorHeight}` : null, 'mm'),
-      row('Pit',          u.pit, 'mm'),
-      row('Head',         u.head, 'mm'),
-      row('Machine Room', u.mrLess != null ? (u.mrLess ? 'MRL (no room)' : 'With machine room') : null),
-    ].filter(r => !r.includes('val-empty'));
+  // ── Split units into banks if BANK_2_START_SX is set ─────────────────────
+  const hasBanks = bank2StartSx != null;
+  const bank1    = hasBanks ? units.filter(u => (u.sx ?? u.shaftIndex ?? 0) <  bank2StartSx) : units;
+  const bank2    = hasBanks ? units.filter(u => (u.sx ?? u.shaftIndex ?? 0) >= bank2StartSx) : [];
 
+  function bankSection(bankUnits, bankNum) {
+    const cards = bankUnits.map((u, i) => buildUnitCard(u, i)).join('');
+    if (!hasBanks) return `<div class="unit-columns">${cards}</div>`;
     return `
-      <div class="info-card unit-card">
-        <div class="info-card-header unit-card-header">
-          <img src="/assets/icons/add-elevator-unit.svg" alt="" class="info-card-icon" />
-          <span>${esc(u.title ?? `Unit ${i + 1}`)}</span>
-        </div>
-        ${unitRows.length ? infoTable(unitRows) : '<p class="val-empty">No unit details available.</p>'}
+      <div class="bank-section">
+        <div class="bank-label">BANK ${bankNum}</div>
+        <div class="unit-columns">${cards}</div>
       </div>
     `;
-  }).join('');
+  }
 
   el.innerHTML = `
     ${groupHtml}
-    <div class="unit-columns">${unitCards}</div>
+    ${bankSection(bank1, 1)}
+    ${bank2.length ? bankSection(bank2, 2) : ''}
   `;
 }
 
@@ -459,8 +451,8 @@ function renderGroupAndUnits(groupEx, units, supplierName) {
 
 function renderAll(data) {
   renderSiteBuilding(data.site, data.building);
-  renderFloorLevels(data.units);
-  renderGroupAndUnits(data.groupEx, data.units, data.supplierName);
+  renderFloorLevels(data.floorLevels, data.units, data.bank2StartSx);
+  renderGroupAndUnits(data.groupEx, data.units, data.supplierName, data.bank2StartSx);
 
   // Make sure all expanders are open after loading
   document.querySelectorAll('.expander-header').forEach(btn => {

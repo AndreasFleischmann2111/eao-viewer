@@ -418,32 +418,61 @@ html, body {
 .fl-dz, .fl-ix { text-align: right; color: var(--dp-eao-font-gray, #808080); }
 .fl-flag-cell { text-align: center; }
 
-/* ── Service Flag Badges ──────────────────────────────────────────────────── */
-.flag-badge {
-  display: inline-block;
-  padding: 2px 7px;
-  border-radius: 2px;
+.fl-zpot { text-align: right; color: var(--dp-eao-font-gray, #808080); }
+
+/* ── Bank header (spans all units of one bank) ───────────────────────────── */
+.fl-bank-header {
+  text-align: center !important;
+  background: var(--dp-eao-dark, #343a40) !important;
+  color: #ffffff !important;
   font-size: 11px;
-  font-weight: var(--eao-ft-bold, 700);
-  letter-spacing: 0.3px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-left: 2px solid rgba(255,255,255,0.2) !important;
 }
 
-.flag-front  { background: #d4edda; color: #155724; }
-.flag-rear   { background: #cce5ff; color: #004085; }
-.flag-both   { background: var(--dp-eao-dark-accent, #6d2077); color: #ffffff; }
-.flag-none   { color: var(--dp-font-unconsidered, #94979a); }
-.flag-raw    { color: #856404; background: #fff3cd; padding: 2px 5px; border-radius: 2px; font-size: 11px; cursor: help; }
+/* ── Unit group header (spans FRONT + REAR) ──────────────────────────────── */
+.fl-unit-group-header {
+  text-align: center !important;
+  background: var(--dp-eao-dark-accent, #6d2077) !important;
+  border-left: 2px solid rgba(255,255,255,0.25) !important;
+}
 
-.fl-legend {
-  display: flex;
+.fl-sub-header {
+  text-align: center !important;
+  background: #4a1650 !important;
+  color: #ffffff !important;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  border-left: 1px solid rgba(255,255,255,0.15) !important;
+}
+
+/* ── Service flag checkmarks ─────────────────────────────────────────────── */
+.fl-flag-cell {
+  text-align: center;
+  border-left: 1px solid var(--dp-eao-light-border, #e0e0e0);
+}
+
+.fl-check {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--dp-eao-dark-accent, #6d2077);
+  color: #ffffff;
   font-size: 12px;
-  color: var(--dp-eao-font-gray, #808080);
-  border-top: 1px solid var(--dp-eao-light-border, #e0e0e0);
-  flex-wrap: wrap;
-  background: var(--dp-eao-light-accent, #f2f2f2);
+  font-weight: bold;
+  border-radius: 2px;
+}
+
+.fl-uncheck {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--dp-eao-light-border, #e0e0e0);
+  border-radius: 2px;
+  background: #ffffff;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -479,6 +508,21 @@ html, body {
 .unit-card-header {
   background: #f0e6f4 !important;
   color: var(--dp-eao-dark-accent, #6d2077) !important;
+}
+
+/* ── Bank sections in unit area ──────────────────────────────────────────── */
+.bank-section {
+  border-top: 2px solid var(--dp-eao-tile-border-color, #e0e0e0);
+}
+
+.bank-label {
+  padding: 6px 16px;
+  background: var(--dp-eao-dark, #343a40);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: var(--eao-ft-bold, 700);
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
