@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EAO Viewer</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════════════════════ -->
+<header class="eao-header">
+  <div class="eao-header-logo">
+    <img src="/assets/icons/dark/ea_header_logo.svg" alt="ElevatorArchitect" class="eao-logo-img" />
+    <span class="eao-header-title">EAO Viewer</span>
+  </div>
+
+  <div class="eao-header-controls">
+
+    <!-- Elevator Group ID -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Elevator Group ID</label>
+      <input id="groupId" type="text" class="ctrl-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+    </div>
+
+    <!-- Environment selector -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Environment</label>
+      <div class="env-buttons">
+        <button class="env-btn" data-env="dev">DEV</button>
+        <button class="env-btn" data-env="staging">STAGING</button>
+        <button class="env-btn active" data-env="prod">PROD</button>
+      </div>
+    </div>
+
+    <!-- Credentials -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Username</label>
+      <input id="username" type="email" class="ctrl-input" placeholder="user@example.com" />
+    </div>
+    <div class="ctrl-group">
+      <label class="ctrl-label">Password</label>
+      <input id="password" type="password" class="ctrl-input" placeholder="••••••••" />
+    </div>
+
+    <!-- Load -->
+    <div class="ctrl-group ctrl-group--action">
+      <button id="loadBtn" class="load-btn">
+        <img src="/assets/icons/elevator-group.svg" alt="" class="btn-icon" />
+        Load
+      </button>
+    </div>
+
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     STATUS BAR
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="statusBar" class="status-bar hidden"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MAIN CONTENT — 3 EXPANDERS
+════════════════════════════════════════════════════════════════════════════ -->
+<main class="eao-main">
+
+  <!-- ── Expander 1: Site & Building ───────────────────────────────────────── -->
+  <section class="expander" id="exp-site">
+    <button class="expander-header" aria-expanded="true" aria-controls="exp-site-body">
+      <span class="expander-icon-wrap">
+        <img src="/assets/icons/site.svg" alt="" class="exp-icon" />
+        <img src="/assets/icons/building.svg" alt="" class="exp-icon" />
+      </span>
+      <span class="expander-title">Site &amp; Building</span>
+      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+    </button>
+    <div class="expander-body" id="exp-site-body">
+      <div id="site-content" class="expander-placeholder">
+        <img src="/assets/icons/circle-info.svg" alt="" />
+        Load an elevator group to view site &amp; building details.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Expander 2: Floor Levels ───────────────────────────────────────────── -->
+  <section class="expander" id="exp-floors">
+    <button class="expander-header" aria-expanded="true" aria-controls="exp-floors-body">
+      <span class="expander-icon-wrap">
+        <img src="/assets/icons/building-entrance.svg" alt="" class="exp-icon" />
+      </span>
+      <span class="expander-title">Floor Levels</span>
+      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+    </button>
+    <div class="expander-body" id="exp-floors-body">
+      <div id="floors-content" class="expander-placeholder">
+        <img src="/assets/icons/circle-info.svg" alt="" />
+        Load an elevator group to view floor levels.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Expander 3: Elevator Group & Units ─────────────────────────────────── -->
+  <section class="expander" id="exp-group">
+    <button class="expander-header" aria-expanded="true" aria-controls="exp-group-body">
+      <span class="expander-icon-wrap">
+        <img src="/assets/icons/elevator-group.svg" alt="" class="exp-icon" />
+      </span>
+      <span class="expander-title">Elevator Group &amp; Units</span>
+      <img src="/assets/icons/chevron-down.svg" alt="" class="chevron" />
+    </button>
+    <div class="expander-body" id="exp-group-body">
+      <div id="group-content" class="expander-placeholder">
+        <img src="/assets/icons/circle-info.svg" alt="" />
+        Load an elevator group to view group &amp; unit details.
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
